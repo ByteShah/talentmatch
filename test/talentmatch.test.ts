@@ -1,17 +1,25 @@
-// import * as cdk from 'aws-cdk-lib/core';
-// import { Template } from 'aws-cdk-lib/assertions';
-// import * as Talentmatch from '../lib/talentmatch-stack';
+import * as cdk from 'aws-cdk-lib/core';
+import { Template } from 'aws-cdk-lib/assertions';
+import { TalentmatchStack } from '../lib/talentmatch-stack';
 
-// example test. To run these tests, uncomment this file along with the
-// example resource in lib/talentmatch-stack.ts
-test('SQS Queue Created', () => {
-//   const app = new cdk.App();
-//     // WHEN
-//   const stack = new Talentmatch.TalentmatchStack(app, 'MyTestStack');
-//     // THEN
-//   const template = Template.fromStack(stack);
+const template = Template.fromStack(new TalentmatchStack(new cdk.App(), 'TestStack', { stage: 'dev' }));
 
-//   template.hasResourceProperties('AWS::SQS::Queue', {
-//     VisibilityTimeout: 300
-//   });
+test('API Lambda is Python 3.12 on arm64', () => {
+  template.hasResourceProperties('AWS::Lambda::Function', { Runtime: 'python3.12', Architectures: ['arm64'] });
+});
+
+test('health route exists', () => {
+  template.hasResourceProperties('AWS::ApiGatewayV2::Route', { RouteKey: 'GET /v1/health' });
+});
+
+test('logs kept for 7 days', () => {
+  template.hasResourceProperties('AWS::Logs::LogGroup', { RetentionInDays: 7 });
+});
+
+test('web bucket blocks all public access', () => {
+  template.hasResourceProperties('AWS::S3::Bucket', {
+    PublicAccessBlockConfiguration: {
+      BlockPublicAcls: true, BlockPublicPolicy: true, IgnorePublicAcls: true, RestrictPublicBuckets: true,
+    },
+  });
 });
