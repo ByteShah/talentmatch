@@ -23,3 +23,16 @@ test('web bucket blocks all public access', () => {
     },
   });
 });
+
+test('table is on-demand with PK and SK', () => {
+  template.hasResourceProperties('AWS::DynamoDB::GlobalTable', {
+    BillingMode: 'PAY_PER_REQUEST',
+    KeySchema: [{ AttributeName: 'PK', KeyType: 'HASH' }, { AttributeName: 'SK', KeyType: 'RANGE' }],
+  });
+});
+
+test('jobs routes exist', () => {
+  template.hasResourceProperties('AWS::ApiGatewayV2::Route', { RouteKey: 'GET /v1/jobs' });
+  template.hasResourceProperties('AWS::ApiGatewayV2::Route', { RouteKey: 'POST /v1/jobs' });
+  template.hasResourceProperties('AWS::ApiGatewayV2::Route', { RouteKey: 'GET /v1/jobs/{jobId}' });
+});
