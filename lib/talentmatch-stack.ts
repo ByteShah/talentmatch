@@ -23,6 +23,7 @@ export class TalentmatchStack extends cdk.Stack {
 
     // 7-day retention keeps logs inside the free tier.
     const apiLogs = new logs.LogGroup(this, 'ApiLogs', {
+      logGroupName: `/talentmatch/${props.stage}/api`,
       retention: logs.RetentionDays.ONE_WEEK,
       removalPolicy: cdk.RemovalPolicy.DESTROY,
     });
@@ -87,5 +88,6 @@ export class TalentmatchStack extends cdk.Stack {
     new cdk.CfnOutput(this, 'ApiUrl', { value: api.apiEndpoint });
     new cdk.CfnOutput(this, 'ApiFunctionName', { value: apiFn.functionName });
     new cdk.CfnOutput(this, 'WebUrl', { value: webUrl });
+    new cdk.CfnOutput(this, 'ApiLogGroup', { value: apiLogs.logGroupName });
   }
 }
