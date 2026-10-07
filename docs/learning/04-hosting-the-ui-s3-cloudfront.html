@@ -1,0 +1,571 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hosting the UI: S3 and CloudFront</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+  <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah" d="M0,0 L10,5 L0,10 z"/></marker>
+  <marker id="arb" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah blue" d="M0,0 L10,5 L0,10 z"/></marker>
+  <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah red" d="M0,0 L10,5 L0,10 z"/></marker>
+  <marker id="arg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah green" d="M0,0 L10,5 L0,10 z"/></marker>
+</defs></svg>
+
+<nav class="topbar" aria-label="Chapters"><div class="in">
+  <a class="home" href="index.html">TalentMatch book</a>
+  <a href="00-plan-and-design.html">0 Plan</a>
+  <a href="01-aws-basics-and-account-setup.html">1 AWS</a>
+  <a href="02-infrastructure-as-code-with-cdk.html">2 CDK</a>
+  <a href="03-lambda-and-the-health-api.html">3 Lambda</a>
+  <a class="here" href="04-hosting-the-ui-s3-cloudfront.html">4 UI hosting</a>
+  <a href="05-dynamodb-explained.html">5 DynamoDB</a>
+  <a href="06-building-the-jobs-api.html">6 Jobs API</a>
+  <a href="07-testing-debugging-and-habits.html">7 Debugging</a>
+</div></nav>
+
+<main>
+<header class="hero">
+  <div class="num">04</div>
+  <div class="kicker">Chapter 4 · Sprint 1 · Frontend half</div>
+  <h1>Hosting the UI: S3 and CloudFront</h1>
+  <p class="sub">How our React page reached the internet from a <strong>private</strong> bucket, how it learns the API's address, and why the browser blocked it until we added CORS.</p>
+  <div class="learn">
+    <h3>What you will learn</h3>
+    <ul>
+      <li>What a static site and an SPA are</li>
+      <li>What <code>npm run build</code> puts in <code>dist/</code></li>
+      <li>S3 buckets, objects and keys</li>
+      <li>Why our bucket is private</li>
+      <li>CloudFront, edge locations and caching</li>
+      <li>OAC: the key only CloudFront holds</li>
+      <li>Why deep links need a fallback</li>
+      <li>CORS, and why curl ignores it</li>
+      <li>How <code>config.json</code> is generated</li>
+      <li>The 7-test checklist</li>
+    </ul>
+  </div>
+  <nav class="toc" aria-label="In this chapter">
+    <a href="#s1">4.1 Static sites</a><a href="#s2">4.2 S3</a><a href="#s3">4.3 CloudFront</a><a href="#s4">4.4 OAC</a>
+    <a href="#s5">4.5 SPA fallback</a><a href="#s6">4.6 CORS</a><a href="#s7">4.7 config.json</a><a href="#s8">4.8 Build &amp; test</a>
+    <a href="#s9">4.9 Explore</a><a href="#qa">Check yourself</a>
+  </nav>
+</header>
+
+<!-- ============================== 4.1 ============================== -->
+<section id="s1">
+<h2><span class="n">4.1</span>Static sites and SPAs</h2>
+<p class="lead">Our UI is a <strong>static site</strong>: a few files (HTML, JS, CSS) that never change while being served. All the "thinking" happens in the browser (React) or in the API (Lambda). So we don't need a web server, just a place to keep files.</p>
+
+<div class="box simple"><span class="label">In simple words</span>
+  <p>A static site is like a <strong>printed board game box</strong>. The box (files) is the same for everyone. You take it home and play on your own table (the browser). Nobody at the shop has to play along with you. A <strong>Single-Page App (SPA)</strong> is a game where you never leave the table: going to "/jobs" just rearranges the pieces instead of fetching a new box.</p>
+  <p>Example: our whole UI is 3 files, about <strong>222 KB</strong> (69 KB gzipped).</p>
+</div>
+
+<figure>
+  <svg viewBox="0 0 760 230" role="img" aria-label="Source files in frontend/src are compiled by npm run build into three files in frontend/dist">
+    <text class="gt" x="20" y="22">frontend/src (you write)</text>
+    <rect class="bx code" x="20" y="34" width="190" height="34" rx="6"/><text class="m" x="32" y="56">App.tsx · main.tsx</text>
+    <rect class="bx code" x="20" y="78" width="190" height="34" rx="6"/><text class="m" x="32" y="100">index.css · App.css</text>
+    <rect class="bx code" x="20" y="122" width="190" height="34" rx="6"/><text class="m" x="32" y="144">node_modules/react…</text>
+    <path class="w" d="M210 51 H250 V95"/><path class="w" d="M210 139 H250 V95"/><path class="w blue" d="M210 95 H288" marker-end="url(#arb)"/>
+    <rect class="bx warn" x="292" y="62" width="170" height="66" rx="8"/>
+    <text class="t" x="306" y="88">npm run build</text>
+    <text class="s" x="306" y="106">tsc -b &amp;&amp; vite build</text>
+    <text class="s" x="306" y="120">type-check, bundle, minify</text>
+    <path class="w blue" d="M462 95 H512" marker-end="url(#arb)"/>
+    <text class="gt" x="516" y="22">frontend/dist (you upload)</text>
+    <rect class="bx data" x="516" y="34" width="226" height="34" rx="6"/><text class="m" x="528" y="56">index.html      0.45 kB</text>
+    <rect class="bx data" x="516" y="78" width="226" height="34" rx="6"/><text class="m" x="528" y="100">assets/index-…js  220 kB</text>
+    <rect class="bx data" x="516" y="122" width="226" height="34" rx="6"/><text class="m" x="528" y="144">assets/index-…css 1.8 kB</text>
+    <text class="s" x="20" y="196">The "…" in the names is a content hash (e.g. index-laRIqOoM.js). New code → new name, so browsers never use a stale copy.</text>
+    <text class="s" x="20" y="214">These numbers come from your own build output.</text>
+  </svg>
+  <figcaption>Figure 4.1 · <code>npm run build</code> turns many source files into a few optimised files in <code>dist/</code>. Only <code>dist/</code> goes to AWS.</figcaption>
+</figure>
+
+<h3>Technical terms</h3>
+<div class="tw"><table class="terms">
+  <tr><th>Term</th><th>Simple meaning</th><th>Example from our project</th></tr>
+  <tr><td>Static site</td><td>Files served exactly as stored</td><td><code>index.html</code>, one JS file, one CSS file</td></tr>
+  <tr><td>SPA</td><td>One HTML page; JavaScript swaps the views</td><td>React shows <code>Path: /jobs/123</code> without a new page</td></tr>
+  <tr><td>Vite</td><td>The build tool for our React app</td><td><code>vite build</code> in <code>package.json</code></td></tr>
+  <tr><td>Bundle</td><td>Many JS files squashed into one</td><td><code>assets/index-laRIqOoM.js</code></td></tr>
+  <tr><td>Content hash</td><td>A fingerprint in the file name</td><td><code>laRIqOoM</code> changes when the code changes</td></tr>
+</table></div>
+</section>
+
+<!-- ============================== 4.2 ============================== -->
+<section id="s2">
+<h2><span class="n">4.2</span>S3: where the files live</h2>
+<p class="lead">S3 (Simple Storage Service) stores files called <strong>objects</strong> inside containers called <strong>buckets</strong>. Each object has a <strong>key</strong>, its full name like <code>assets/index-laRIqOoM.js</code>. Our web bucket is <strong>locked</strong>: nobody on the internet can read it directly.</p>
+
+<div class="box simple"><span class="label">In simple words</span>
+  <p>A bucket is a <strong>locker at school</strong>. Objects are the books inside, and the key is the label on each book's spine. "Block public access" means the locker has no window and no spare key, so even if a book fell open, nobody walking past could read it.</p>
+</div>
+
+<div class="file">lib/talentmatch-stack.ts</div>
+<pre class="code"><span class="k">const</span> webBucket = <span class="k">new</span> s3.Bucket(<span class="k">this</span>, <span class="s">'WebBucket'</span>, {
+  blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,   <span class="c">// can never be made public by accident</span>
+  encryption: s3.BucketEncryption.S3_MANAGED,          <span class="c">// files encrypted on disk, AWS manages the key (free)</span>
+  enforceSSL: true,                                    <span class="c">// refuse plain http:// requests to the bucket</span>
+  removalPolicy: cdk.RemovalPolicy.DESTROY,            <span class="c">// cdk destroy deletes the bucket…</span>
+<span class="hl">  autoDeleteObjects: <span class="k">true</span>,                             <span class="c">// …after a helper Lambda empties it</span></span>
+});</pre>
+
+<div class="tw"><table>
+  <tr><th>Setting</th><th>What it does</th><th>What happens without it</th></tr>
+  <tr><td><code>BLOCK_ALL</code></td><td>Four switches that forbid public ACLs and public policies</td><td>One wrong click could expose the bucket</td></tr>
+  <tr><td><code>S3_MANAGED</code></td><td>Server-side encryption with S3-owned keys (SSE-S3)</td><td>S3 now encrypts by default anyway; this makes it explicit</td></tr>
+  <tr><td><code>enforceSSL</code></td><td>Adds a bucket policy denying requests where <code>aws:SecureTransport</code> is false</td><td>Data could travel unencrypted</td></tr>
+  <tr><td><code>autoDeleteObjects</code></td><td>Adds a <em>custom resource</em> Lambda that empties the bucket on destroy</td><td>S3 refuses to delete a non-empty bucket, so <code>cdk destroy</code> fails</td></tr>
+</table></div>
+
+<div class="box story"><span class="label">Real story from our build</span>
+  <p><strong>"There's one bucket left after destroy. Can I delete it?"</strong> It was <code>cdk-hnb659fds-assets-143495498376-ap-south-1</code>, the <strong>CDK bootstrap bucket</strong>. It belongs to the <code>CDKToolkit</code> stack, not to <code>TalentMatch-dev</code>, and every <code>cdk deploy</code> uploads our zips there first. Delete it and the next deploy fails. The <strong>web bucket</strong> (<code>talentmatch-dev-webbucket…</code>) is the one <code>cdk destroy</code> removes.</p>
+  <div class="tw"><table>
+    <tr><th>Bucket</th><th>Owner stack</th><th>Contains</th><th>Delete?</th></tr>
+    <tr><td><code>cdk-hnb659fds-assets-…</code></td><td>CDKToolkit</td><td>hash-named <code>.zip</code> and <code>.json</code> assets</td><td><span class="pill red">No, keep</span></td></tr>
+    <tr><td><code>talentmatch-dev-webbucket…</code></td><td>TalentMatch-dev</td><td><code>index.html</code>, <code>assets/</code>, <code>config.json</code></td><td><span class="pill green">Only via cdk destroy</span></td></tr>
+  </table></div>
+</div>
+
+<h3>Try it</h3>
+<ol class="steps">
+  <li><strong>Get the web bucket's real name from the stack</strong> (no guessing).
+<pre class="term"><span class="p">$ </span>aws cloudformation describe-stack-resources --stack-name TalentMatch-dev \
+    --query "StackResources[?ResourceType=='AWS::S3::Bucket'].PhysicalResourceId" --output text
+<span class="o">talentmatch-dev-webbucket12880f5b-xxxxxxxxxxxx</span></pre></li>
+  <li><strong>List what's inside</strong>.
+<pre class="term"><span class="p">$ </span>aws s3 ls s3://&lt;bucket-name&gt; --recursive --human-readable
+<span class="o">2026-10-07 04:10:11  450 Bytes index.html
+2026-10-07 04:10:11  215.1 KiB assets/index-laRIqOoM.js
+2026-10-07 04:10:11    1.7 KiB assets/index-DGNrK5qb.css
+2026-10-07 04:10:12   88 Bytes config.json</span></pre></li>
+  <li><strong>Prove it's private</strong>: ask S3 directly, skipping CloudFront.
+<pre class="term"><span class="p">$ </span>curl -s -o /dev/null -w '%{http_code}\n' https://&lt;bucket-name&gt;.s3.ap-south-1.amazonaws.com/index.html
+<span class="o">403</span></pre></li>
+</ol>
+
+<h3>Technical terms</h3>
+<div class="tw"><table class="terms">
+  <tr><th>Term</th><th>Simple meaning</th><th>Example from our project</th></tr>
+  <tr><td>Bucket</td><td>A named container for files</td><td><code>talentmatch-dev-webbucket…</code></td></tr>
+  <tr><td>Object</td><td>One stored file</td><td><code>index.html</code></td></tr>
+  <tr><td>Key</td><td>The object's full name/path</td><td><code>assets/index-laRIqOoM.js</code></td></tr>
+  <tr><td>Block Public Access</td><td>Master switches that stop public exposure</td><td><code>BlockPublicAccess.BLOCK_ALL</code></td></tr>
+  <tr><td>SSE-S3</td><td>Encryption at rest with AWS-managed keys</td><td><code>BucketEncryption.S3_MANAGED</code></td></tr>
+  <tr><td>Bucket policy</td><td>Rules attached to the bucket: who may do what</td><td>Deny non-HTTPS; allow CloudFront (4.4)</td></tr>
+  <tr><td>Custom resource</td><td>A helper Lambda CloudFormation runs during deploy/destroy</td><td><code>Custom::S3AutoDeleteObjects</code></td></tr>
+</table></div>
+</section>
+
+<!-- ============================== 4.3 ============================== -->
+<section id="s3">
+<h2><span class="n">4.3</span>CloudFront: the delivery network</h2>
+<p class="lead">CloudFront is AWS's <strong>CDN</strong> (Content Delivery Network). It keeps copies of our files in hundreds of <strong>edge locations</strong> worldwide, serves them over HTTPS from the nearest one, and asks S3 only when it doesn't have a copy.</p>
+
+<div class="box simple"><span class="label">In simple words</span>
+  <p>S3 is the <strong>central warehouse</strong> in Mumbai. CloudFront is a chain of <strong>corner shops</strong> in every city. The first customer in Delhi asks the Delhi shop for <code>index.html</code>. The shop doesn't have it, fetches it from the warehouse (a "miss") and keeps a copy. The next customer gets it straight off the shelf (a "hit"). Faster for everyone, and the warehouse is visited less.</p>
+</div>
+
+<figure>
+  <svg viewBox="0 0 760 260" role="img" aria-label="Users in three cities hit nearby CloudFront edges; on a cache miss the edge fetches from the private S3 bucket in Mumbai">
+    <rect class="bx user" x="20" y="24" width="140" height="44" rx="8"/><text class="t" x="34" y="44">User in Delhi</text><text class="s" x="34" y="59">browser</text>
+    <rect class="bx user" x="20" y="104" width="140" height="44" rx="8"/><text class="t" x="34" y="124">User in Pune</text><text class="s" x="34" y="139">browser</text>
+    <rect class="bx user" x="20" y="184" width="140" height="44" rx="8"/><text class="t" x="34" y="204">User in London</text><text class="s" x="34" y="219">browser</text>
+    <path class="w blue" d="M160 46 H250" marker-end="url(#arb)"/>
+    <path class="w blue" d="M160 126 H250" marker-end="url(#arb)"/>
+    <path class="w blue" d="M160 206 H250" marker-end="url(#arb)"/>
+    <rect class="grp" x="254" y="10" width="220" height="236" rx="10"/>
+    <text class="gt" x="266" y="30">CLOUDFRONT EDGES</text>
+    <rect class="bx aws" x="268" y="40" width="190" height="36" rx="6"/><text class="t" x="280" y="63">Delhi edge · HIT</text>
+    <rect class="bx aws" x="268" y="108" width="190" height="36" rx="6"/><text class="t" x="280" y="131">Mumbai edge · HIT</text>
+    <rect class="bx warn" x="268" y="188" width="190" height="36" rx="6"/><text class="t" x="280" y="211">London edge · MISS</text>
+    <path class="w" d="M458 206 H520 V128 H556" marker-end="url(#ar)"/>
+    <text class="lb" x="526" y="176">fetch</text><text class="lb" x="526" y="188">once</text>
+    <rect class="bx data" x="560" y="96" width="182" height="64" rx="8"/>
+    <text class="t" x="574" y="120">S3 web bucket</text>
+    <text class="s" x="574" y="138">ap-south-1 (Mumbai)</text>
+    <text class="s" x="574" y="152">private, origin</text>
+  </svg>
+  <figcaption>Figure 4.2 · Every user talks to a nearby edge. Only a cache <em>miss</em> goes back to the bucket (the "origin").</figcaption>
+</figure>
+
+<div class="file">lib/talentmatch-stack.ts</div>
+<pre class="code"><span class="k">const</span> web = <span class="k">new</span> cloudfront.Distribution(<span class="k">this</span>, <span class="s">'WebDistribution'</span>, {
+  defaultBehavior: {
+    origin: origins.S3BucketOrigin.withOriginAccessControl(webBucket),   <span class="c">// 4.4</span>
+    viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,  <span class="c">// http:// → https://</span>
+  },
+  defaultRootObject: <span class="s">'index.html'</span>,        <span class="c">// "/" means index.html</span>
+  errorResponses: [ … ],                    <span class="c">// SPA fallback, 4.5</span>
+});
+<span class="k">const</span> webUrl = <span class="s">`https://${web.distributionDomainName}`</span>;   <span class="c">// https://d2kcn6pne6ts5i.cloudfront.net</span></pre>
+
+<div class="box tech"><span class="label">Technical view</span>
+  <p>A <strong>distribution</strong> has one or more <strong>origins</strong> (where files come from) and <strong>behaviors</strong> (rules per path). Each cached copy lives for its TTL (time to live). The default cache policy keeps files up to 24 hours. When we deploy new files, <code>BucketDeployment</code> sends an <strong>invalidation</strong> for <code>/*</code>, which tells every edge to drop its copies, so users get the new version. The first 1,000 invalidation paths a month are free, and <code>/*</code> counts as one.</p>
+</div>
+
+<div class="box warn"><span class="label">Watch out</span>
+  <p>The first deploy of a distribution takes <strong>5–10 minutes</strong>, because CloudFront has to roll it out to every edge. That's normal, not stuck. Watch it in CloudFormation → <code>TalentMatch-dev</code> → Events.</p>
+</div>
+
+<h3>Technical terms</h3>
+<div class="tw"><table class="terms">
+  <tr><th>Term</th><th>Simple meaning</th><th>Example from our project</th></tr>
+  <tr><td>CDN</td><td>Shops near users that keep copies of files</td><td>CloudFront</td></tr>
+  <tr><td>Edge location</td><td>One of those shops (a data centre in a city)</td><td>Mumbai, Delhi, Chennai, … worldwide</td></tr>
+  <tr><td>Distribution</td><td>Your CloudFront setup with its own domain</td><td><code>d2kcn6pne6ts5i.cloudfront.net</code></td></tr>
+  <tr><td>Origin</td><td>Where the edge fetches originals from</td><td>The S3 web bucket</td></tr>
+  <tr><td>Cache hit / miss</td><td>Served from the shop / fetched from the warehouse</td><td>Header <code>x-cache: Hit from cloudfront</code></td></tr>
+  <tr><td>TTL</td><td>How long a copy stays on the shelf</td><td>Default policy: up to 24 h</td></tr>
+  <tr><td>Invalidation</td><td>"Throw away your copies"</td><td><code>distributionPaths: ['/*']</code></td></tr>
+</table></div>
+</section>
+
+<!-- ============================== 4.4 ============================== -->
+<section id="s4">
+<h2><span class="n">4.4</span>OAC: the key only CloudFront holds</h2>
+<p class="lead">The bucket is private, so how does CloudFront read it? With <strong>Origin Access Control (OAC)</strong>: CloudFront signs every request to S3, and the bucket policy says "allow reads only if the signer is <em>this</em> distribution".</p>
+
+<div class="box simple"><span class="label">In simple words</span>
+  <p>The locker (bucket) has a note taped inside: "<strong>Only the school librarian with badge #E2ABC may take books out.</strong>" CloudFront is that librarian. You, walking up to the locker yourself, have no badge, so the answer is "403 Forbidden". Asking the librarian (the CloudFront URL) works.</p>
+</div>
+
+<figure>
+  <svg viewBox="0 0 760 250" role="img" aria-label="Allowed path: browser to CloudFront to S3 with a signed request. Blocked path: browser directly to S3 returns 403">
+    <text class="gt" x="20" y="22">ALLOWED</text>
+    <rect class="bx user" x="20" y="34" width="140" height="48" rx="8"/><text class="t" x="34" y="56">Browser</text><text class="s" x="34" y="72">your page</text>
+    <path class="w green" d="M160 58 H262" marker-end="url(#arg)"/><text class="lb" x="170" y="50">HTTPS</text>
+    <rect class="bx aws" x="266" y="34" width="180" height="48" rx="8"/><text class="t" x="280" y="56">CloudFront</text><text class="s" x="280" y="72">signs with OAC (SigV4)</text>
+    <path class="w green" d="M446 58 H552" marker-end="url(#arg)"/><text class="lb" x="454" y="50">signed GET</text>
+    <rect class="bx data" x="556" y="34" width="186" height="48" rx="8"/><text class="t" x="570" y="56">S3 bucket</text><text class="s" x="570" y="72">policy: allow this dist ✓</text>
+
+    <text class="gt" x="20" y="128">BLOCKED</text>
+    <rect class="bx user" x="20" y="140" width="140" height="48" rx="8"/><text class="t" x="34" y="162">Browser / curl</text><text class="s" x="34" y="178">direct S3 URL</text>
+    <path class="w red" d="M160 164 H552" marker-end="url(#arr)"/><text class="lb" x="200" y="156">unsigned GET to …s3.ap-south-1.amazonaws.com</text>
+    <rect class="bx bad" x="556" y="140" width="186" height="48" rx="8"/><text class="t" x="570" y="162">403 Forbidden</text><text class="s" x="570" y="178">block public access</text>
+    <text class="s" x="20" y="226">The bucket policy names the distribution's ARN in a condition (AWS:SourceArn), so even another CloudFront distribution can't read it.</text>
+  </svg>
+  <figcaption>Figure 4.3 · Same files, two doors. Only the CloudFront door has the right badge.</figcaption>
+</figure>
+
+<p>CDK writes that policy for you from one line, <code>S3BucketOrigin.withOriginAccessControl(webBucket)</code>. In <code>cdk diff</code> it showed up in the IAM table as roughly:</p>
+<pre class="code">Effect:    Allow
+Principal: Service cloudfront.amazonaws.com
+Action:    s3:GetObject
+Resource:  arn:aws:s3:::talentmatch-dev-webbucket…/*
+Condition: AWS:SourceArn = arn:aws:cloudfront::143495498376:distribution/E…   <span class="c">← only OUR distribution</span></pre>
+
+<div class="box tech"><span class="label">Technical view</span>
+  <p>OAC replaced the older OAI (Origin Access Identity). OAC signs requests with SigV4, supports SSE-KMS buckets, and works in all regions. Because the bucket grants only <code>s3:GetObject</code> and not <code>s3:ListBucket</code>, a missing file returns <strong>403</strong> rather than 404. S3 won't even tell an outsider whether a key exists. That detail matters in the next section.</p>
+</div>
+
+<h3>Technical terms</h3>
+<div class="tw"><table class="terms">
+  <tr><th>Term</th><th>Simple meaning</th><th>Example from our project</th></tr>
+  <tr><td>OAC</td><td>CloudFront's badge to read a private bucket</td><td><code>withOriginAccessControl(webBucket)</code></td></tr>
+  <tr><td>Principal</td><td>Who the rule is about</td><td><code>cloudfront.amazonaws.com</code></td></tr>
+  <tr><td>Condition / SourceArn</td><td>"…but only when it's this exact one"</td><td>Our distribution's ARN</td></tr>
+  <tr><td>SigV4</td><td>AWS's way of signing requests so they can't be faked</td><td>CloudFront → S3 requests</td></tr>
+  <tr><td>403 Forbidden</td><td>"You're not allowed"</td><td>Direct S3 URL, or a missing key via OAC</td></tr>
+</table></div>
+</section>
+
+<!-- ============================== 4.5 ============================== -->
+<section id="s5">
+<h2><span class="n">4.5</span>The SPA fallback: making deep links work</h2>
+<p class="lead">Open <code>/jobs/123</code> and refresh, and the browser asks CloudFront for a file called <code>jobs/123</code>. That file doesn't exist. Our fallback rule says: "when S3 says 403 or 404, send <code>index.html</code> with status 200", and React then reads the URL and shows the right view.</p>
+
+<div class="box simple"><span class="label">In simple words</span>
+  <p>You ask the shop for "the page about job 123". The shop has no such sheet, only the one <strong>magic book</strong> (<code>index.html</code>) that can show any page. So instead of saying "we don't have it", the shop hands you the magic book, and the book opens itself to job 123.</p>
+</div>
+
+<figure>
+  <svg viewBox="0 0 760 330" role="img" aria-label="Flowchart: request path, does the file exist in S3? yes returns the file; no means S3 returns 403, CloudFront swaps in index.html with 200, React router reads the path">
+    <rect class="bx user" x="270" y="10" width="220" height="40" rx="20"/><text class="t" x="296" y="35">GET /jobs/123 (refresh)</text>
+    <path class="w" d="M380 50 V76" marker-end="url(#ar)"/>
+    <rect class="bx aws" x="250" y="80" width="260" height="40" rx="6"/><text class="t" x="266" y="105">CloudFront asks S3 for key jobs/123</text>
+    <path class="w" d="M380 120 V146" marker-end="url(#ar)"/>
+    <polygon class="bx warn" points="380,150 500,190 380,230 260,190"/>
+    <text class="t" x="330" y="187">file exists?</text><text class="s" x="337" y="203">(via OAC)</text>
+    <path class="w green" d="M500 190 H566" marker-end="url(#arg)"/><text class="lb" x="512" y="182">yes</text>
+    <rect class="bx user" x="570" y="166" width="172" height="48" rx="6"/><text class="t" x="584" y="187">return the file</text><text class="s" x="584" y="203">e.g. assets/index-….js</text>
+    <path class="w red" d="M260 190 H194" marker-end="url(#arr)"/><text class="lb" x="206" y="182">no</text>
+    <rect class="bx bad" x="20" y="166" width="170" height="48" rx="6"/><text class="t" x="34" y="187">S3 → 403</text><text class="s" x="34" y="203">(no ListBucket, so 403)</text>
+    <path class="w" d="M105 214 V250" marker-end="url(#ar)"/>
+    <rect class="bx aws" x="20" y="254" width="310" height="48" rx="6"/><text class="t" x="34" y="275">errorResponses: 403/404 → /index.html</text><text class="s" x="34" y="291">responseHttpStatus 200</text>
+    <path class="w blue" d="M330 278 H416" marker-end="url(#arb)"/>
+    <rect class="bx code" x="420" y="254" width="322" height="48" rx="6"/><text class="t" x="434" y="275">React reads window.location.pathname</text><text class="s" x="434" y="291">page shows "Path: /jobs/123"</text>
+  </svg>
+  <figcaption>Figure 4.4 · Real files are served as-is. Anything else turns into <code>index.html</code>, and React takes over.</figcaption>
+</figure>
+
+<div class="file">lib/talentmatch-stack.ts</div>
+<pre class="code">errorResponses: [
+<span class="hl">  { httpStatus: 403, responseHttpStatus: 200, responsePagePath: <span class="s">'/index.html'</span> },   <span class="c">// OAC hides missing keys as 403</span></span>
+  { httpStatus: 404, responseHttpStatus: 200, responsePagePath: <span class="s">'/index.html'</span> },
+],</pre>
+
+<div class="box warn"><span class="label">Watch out</span>
+  <p>The fallback is global. A typo like <code>/asets/app.js</code> also gets <code>index.html</code> with 200, so a missing JS file can look like "the page loaded but is blank". Check the Network tab: the JS request will show <code>content-type: text/html</code>.</p>
+</div>
+
+<h3>Technical terms</h3>
+<div class="tw"><table class="terms">
+  <tr><th>Term</th><th>Simple meaning</th><th>Example from our project</th></tr>
+  <tr><td>Deep link</td><td>A URL to a page inside the app</td><td><code>/jobs/123</code></td></tr>
+  <tr><td>Client-side routing</td><td>JavaScript decides what to show for a URL</td><td>React reads <code>window.location.pathname</code></td></tr>
+  <tr><td>Error response</td><td>CloudFront rule that rewrites an error</td><td>403 → <code>/index.html</code> with 200</td></tr>
+  <tr><td>Default root object</td><td>What "/" means</td><td><code>index.html</code></td></tr>
+</table></div>
+</section>
+
+<!-- ============================== 4.6 ============================== -->
+<section id="s6">
+<h2><span class="n">4.6</span>CORS: why the browser blocked us and curl didn't</h2>
+<p class="lead">Our page lives on <code>https://d2kcn6pne6ts5i.cloudfront.net</code> and the API on <code>https://1ezo0amr36.execute-api…</code>. Those are different <strong>origins</strong>. Browsers won't let a page read a response from another origin unless that server explicitly says "this origin is allowed". That permission system is <strong>CORS</strong>.</p>
+
+<div class="box simple"><span class="label">In simple words</span>
+  <p>The browser is a <strong>strict parent</strong>. Your page (the kid) wants to talk to a stranger's house (the API). The parent first phones that house (the <em>preflight</em>) and asks: "Is my kid from CloudFront Street allowed to visit?" Only if the house answers "yes, CloudFront Street is welcome" does the visit happen. curl is an adult with no parent, so it just walks in. That's why curl worked and the browser didn't.</p>
+</div>
+
+<figure>
+  <svg viewBox="0 0 760 330" role="img" aria-label="Sequence: browser page sends OPTIONS preflight to API Gateway with Origin header; API Gateway answers with access-control-allow-origin; then the browser sends the real GET and reads the response">
+    <rect class="bx user" x="20" y="12" width="200" height="40" rx="6"/><text class="t" x="34" y="37">Page on cloudfront.net</text>
+    <rect class="bx aws" x="290" y="12" width="200" height="40" rx="6"/><text class="t" x="304" y="37">API Gateway (CORS)</text>
+    <rect class="bx code" x="560" y="12" width="182" height="40" rx="6"/><text class="t" x="574" y="37">Lambda</text>
+    <line class="w dash" x1="120" y1="52" x2="120" y2="300"/>
+    <line class="w dash" x1="390" y1="52" x2="390" y2="300"/>
+    <line class="w dash" x1="650" y1="52" x2="650" y2="300"/>
+    <path class="w blue" d="M120 86 H385" marker-end="url(#arb)"/>
+    <text class="lb" x="128" y="70">1 OPTIONS /v1/jobs (preflight)</text>
+    <text class="lb" x="128" y="80">Origin: https://d2kcn6pne6ts5i…</text>
+    <path class="w green" d="M390 134 H125" marker-end="url(#arg)"/>
+    <text class="lb" x="128" y="110">2 204 · allow-origin: …cloudfront.net</text>
+    <text class="lb" x="128" y="122">allow-methods: GET,POST</text>
+    <path class="w blue" d="M120 176 H385" marker-end="url(#arb)"/><text class="lb" x="128" y="168">3 POST /v1/jobs (the real request)</text>
+    <path class="w" d="M390 196 H645" marker-end="url(#ar)"/><text class="lb" x="398" y="188">4 invoke</text>
+    <path class="w" d="M650 222 H395" marker-end="url(#ar)"/><text class="lb" x="460" y="214">5 201 + body</text>
+    <path class="w green" d="M390 254 H125" marker-end="url(#arg)"/><text class="lb" x="128" y="246">6 201 + allow-origin → JS reads it</text>
+    <text class="s" x="20" y="322">Preflight (steps 1–2) is answered by API Gateway itself. Lambda never sees OPTIONS. A plain GET skips steps 1–2.</text>
+  </svg>
+  <figcaption>Figure 4.5 · For a POST with JSON, the browser first asks permission (preflight), then sends the real request.</figcaption>
+</figure>
+
+<div class="file">lib/talentmatch-stack.ts</div>
+<pre class="code"><span class="k">const</span> api = <span class="k">new</span> apigw.HttpApi(<span class="k">this</span>, <span class="s">'HttpApi'</span>, {
+  apiName: <span class="s">`talentmatch-${props.stage}`</span>,
+  corsPreflight: {
+<span class="hl">    allowOrigins: props.stage === <span class="s">'dev'</span> ? [webUrl, <span class="s">'http://localhost:5173'</span>] : [webUrl],</span>
+    allowMethods: [apigw.CorsHttpMethod.GET, apigw.CorsHttpMethod.POST],
+    allowHeaders: [<span class="s">'content-type'</span>],
+  },
+});</pre>
+<p>Notice that the API needs <code>webUrl</code>, so the distribution must be created <strong>before</strong> the API in the code. In dev we also allow <code>http://localhost:5173</code> so <code>npm run dev</code> works. Prod allows only the real site.</p>
+
+<div class="box story"><span class="label">Real story from our build</span>
+  <p>Before we added <code>corsPreflight</code>, <code>npm run dev</code> on localhost showed <strong>"API error: Failed to fetch"</strong>. Meanwhile <code>curl $API/v1/health</code> worked perfectly. DevTools → Console told the truth: <em>"blocked by CORS policy: No 'Access-Control-Allow-Origin' header"</em>. The request had reached the server. The browser just refused to hand the answer to our JavaScript.</p>
+</div>
+
+<h3>Technical terms</h3>
+<div class="tw"><table class="terms">
+  <tr><th>Term</th><th>Simple meaning</th><th>Example from our project</th></tr>
+  <tr><td>Origin</td><td>Scheme + host + port of a page</td><td><code>https://d2kcn6pne6ts5i.cloudfront.net</code></td></tr>
+  <tr><td>CORS</td><td>Rules that let a server allow other origins</td><td><code>corsPreflight</code> on the HTTP API</td></tr>
+  <tr><td>Preflight</td><td>The browser's "may I?" OPTIONS request</td><td>Before every <code>POST</code> with JSON</td></tr>
+  <tr><td>Access-Control-Allow-Origin</td><td>The server's "yes, you may" header</td><td>Set to our CloudFront URL</td></tr>
+  <tr><td>Simple request</td><td>A request that skips preflight</td><td>Our plain <code>GET /v1/health</code></td></tr>
+</table></div>
+</section>
+
+<!-- ============================== 4.7 ============================== -->
+<section id="s7">
+<h2><span class="n">4.7</span>config.json: telling the page where the API is</h2>
+<p class="lead">The API URL only exists <strong>after</strong> deploy, so it can't be baked into the React build. Instead, CDK writes a small <code>config.json</code> into the bucket at deploy time, and the page fetches it first.</p>
+
+<div class="box simple"><span class="label">In simple words</span>
+  <p>You print the game box (the build) before you know which café you'll play in. So you leave a <strong>blank sticky note</strong> slot. On delivery day, the delivery person (CDK) writes the café's address on the note (<code>config.json</code>). The game reads the note when it opens.</p>
+</div>
+
+<figure>
+  <svg viewBox="0 0 760 290" role="img" aria-label="At deploy, BucketDeployment copies frontend/dist except config.json and writes a generated config.json with the API URL; it then invalidates CloudFront. In the browser, App.tsx fetches config.json, then calls the API">
+    <text class="gt" x="20" y="22">AT DEPLOY TIME (cdk deploy)</text>
+    <rect class="bx data" x="20" y="34" width="200" height="44" rx="6"/><text class="t" x="34" y="54">frontend/dist</text><text class="s" x="34" y="70">exclude: ['config.json']</text>
+    <rect class="bx warn" x="20" y="92" width="200" height="44" rx="6"/><text class="t" x="34" y="112">Source.jsonData(…)</text><text class="s" x="34" y="128">{ apiUrl, stage: "dev" }</text>
+    <path class="w" d="M220 56 H262 V90"/><path class="w" d="M220 114 H262 V90"/><path class="w blue" d="M262 90 H296" marker-end="url(#arb)"/>
+    <rect class="bx aws" x="300" y="62" width="200" height="56" rx="8"/><text class="t" x="314" y="86">BucketDeployment</text><text class="s" x="314" y="104">custom-resource Lambda</text>
+    <path class="w blue" d="M500 90 H556" marker-end="url(#arb)"/>
+    <rect class="bx data" x="560" y="34" width="182" height="44" rx="6"/><text class="t" x="574" y="54">S3 web bucket</text><text class="s" x="574" y="70">+ config.json (real URL)</text>
+    <path class="w dash" d="M651 78 V96" marker-end="url(#ar)"/>
+    <rect class="bx aws" x="560" y="100" width="182" height="36" rx="6"/><text class="s" x="574" y="122">invalidate CloudFront /*</text>
+
+    <text class="gt" x="20" y="176">IN THE BROWSER (App.tsx)</text>
+    <rect class="bx code" x="20" y="188" width="200" height="44" rx="6"/><text class="t" x="34" y="208">1 fetch('/config.json')</text><text class="s" x="34" y="224">same origin, no CORS</text>
+    <path class="w blue" d="M220 210 H296" marker-end="url(#arb)"/>
+    <rect class="bx code" x="300" y="188" width="200" height="44" rx="6"/><text class="t" x="314" y="208">2 fetch(apiUrl+health)</text><text class="s" x="314" y="224">cross-origin, needs CORS</text>
+    <path class="w blue" d="M500 210 H556" marker-end="url(#arb)"/>
+    <rect class="bx user" x="560" y="188" width="182" height="44" rx="6"/><text class="t" x="574" y="208">3 show status</text><text class="s" x="574" y="224">"API ok · dev · v0.1.0"</text>
+    <text class="s" x="20" y="268">Locally, Vite serves frontend/public/config.json instead, which you edit by hand.</text>
+  </svg>
+  <figcaption>Figure 4.6 · The same build works in every environment, because the address arrives as a separate file.</figcaption>
+</figure>
+
+<div class="file">lib/talentmatch-stack.ts</div>
+<pre class="code"><span class="k">new</span> s3deploy.BucketDeployment(<span class="k">this</span>, <span class="s">'WebDeployment'</span>, {
+  destinationBucket: webBucket,
+  sources: [
+    s3deploy.Source.asset(path.join(__dirname, <span class="s">'..'</span>, <span class="s">'frontend'</span>, <span class="s">'dist'</span>), { exclude: [<span class="s">'config.json'</span>] }),
+<span class="hl">    s3deploy.Source.jsonData(<span class="s">'config.json'</span>, { apiUrl: api.apiEndpoint, stage: props.stage }),</span>
+  ],
+  distribution: web,          <span class="c">// after upload…</span>
+  distributionPaths: [<span class="s">'/*'</span>],  <span class="c">// …clear every cached copy</span>
+});</pre>
+
+<div class="tw"><table>
+  <tr><th>Where</th><th>Which config.json</th><th>apiUrl comes from</th></tr>
+  <tr><td>Deployed site (CloudFront)</td><td>Generated by <code>Source.jsonData</code></td><td><code>api.apiEndpoint</code>, filled in at deploy</td></tr>
+  <tr><td>Local <code>npm run dev</code></td><td><code>frontend/public/config.json</code></td><td>You paste the <code>ApiUrl</code> output by hand</td></tr>
+</table></div>
+
+<div class="box story"><span class="label">Real story from our build</span>
+  <p>After we destroyed and redeployed, the API got a <strong>new</strong> ID (<code>1ezo0amr36</code>), but <code>frontend/public/config.json</code> still says <code>h16tw1z5r0</code>, the old one. The deployed site was fine because CDK regenerates its copy. Only localhost breaks. <strong>After every fresh deploy, copy the new <code>ApiUrl</code> into the local file.</strong></p>
+</div>
+
+<div class="box warn"><span class="label">Watch out</span>
+  <p><code>Source.asset('frontend/dist')</code> zips that folder during <code>cdk synth</code>. If <code>dist/</code> doesn't exist, synth, diff, deploy and even <code>npm test</code> fail with <em>Cannot find asset</em>. Run <code>npm run build</code> in <code>frontend/</code> first.</p>
+</div>
+
+<h3>Technical terms</h3>
+<div class="tw"><table class="terms">
+  <tr><th>Term</th><th>Simple meaning</th><th>Example from our project</th></tr>
+  <tr><td>Runtime config</td><td>Settings read when the app starts, not at build</td><td><code>/config.json</code></td></tr>
+  <tr><td>BucketDeployment</td><td>CDK helper that copies files into a bucket</td><td><code>WebDeployment</code></td></tr>
+  <tr><td>Source.jsonData</td><td>Write a JSON file whose values exist only at deploy</td><td><code>{ apiUrl: api.apiEndpoint }</code></td></tr>
+  <tr><td>Token</td><td>A placeholder CDK fills in during deploy</td><td><code>api.apiEndpoint</code> before deploy</td></tr>
+  <tr><td><code>public/</code> folder</td><td>Files Vite copies as-is into <code>dist/</code></td><td>Your local <code>config.json</code></td></tr>
+</table></div>
+</section>
+
+<!-- ============================== 4.8 ============================== -->
+<section id="s8">
+<h2><span class="n">4.8</span>Build, deploy and test it</h2>
+<p class="lead">Two projects live in one repo: the CDK app at the root and the React app in <code>frontend/</code>. Each has its own <code>package.json</code>, so <strong>where you stand decides what <code>npm</code> runs</strong>.</p>
+
+<div class="tw"><table>
+  <tr><th>Folder</th><th>Scripts in its package.json</th><th>Used for</th></tr>
+  <tr><td><code>talentmatch/</code> (root)</td><td><code>build</code>, <code>watch</code>, <code>test</code>, <code>cdk</code></td><td>Type-check CDK, Jest tests, deploy</td></tr>
+  <tr><td><code>talentmatch/frontend/</code></td><td><code>dev</code>, <code>build</code>, <code>lint</code>, <code>preview</code> (no <code>test</code>)</td><td>React dev server and production build</td></tr>
+</table></div>
+
+<div class="box story"><span class="label">Real story from our build</span>
+  <p>The frontend build printed <code>✓ built in 288ms</code> and then <code>npm error Missing script: "test"</code>. Nothing was broken. <code>npm test</code> had simply run inside <code>frontend/</code>, which has no test script. The fix is <code>cd ..</code> first. Use <code>pwd</code> when unsure, and <code>npm run</code> to list the scripts where you are.</p>
+</div>
+
+<p>The root <code>tsconfig.json</code> would also try to compile the React <code>.tsx</code> files with the wrong settings, so we exclude that folder:</p>
+<div class="file">tsconfig.json (root)</div>
+<pre class="code">"exclude": [ "node_modules", "cdk.out", <span class="hl"><span class="s">"frontend"</span></span> ]</pre>
+
+<h3>Try it: the full loop</h3>
+<ol class="steps">
+  <li><strong>Build the UI</strong> (inside <code>frontend/</code>).
+<pre class="term"><span class="p">$ </span>cd ~/Work/labs/talentmatch/frontend &amp;&amp; npm run build
+<span class="o">dist/index.html                   0.45 kB │ gzip:  0.29 kB
+dist/assets/index-DGNrK5qb.css    1.78 kB │ gzip:  0.81 kB
+dist/assets/index-laRIqOoM.js   220.24 kB │ gzip: 68.89 kB
+✓ built in 288ms</span></pre></li>
+  <li><strong>Back to the root</strong>: check, then deploy.
+<pre class="term"><span class="p">$ </span>cd .. &amp;&amp; npm run build &amp;&amp; npm test
+<span class="p">$ </span>npx cdk diff TalentMatch-dev
+<span class="p">$ </span>npx cdk deploy TalentMatch-dev
+<span class="o">Outputs:
+TalentMatch-dev.ApiUrl = https://1ezo0amr36.execute-api.ap-south-1.amazonaws.com
+TalentMatch-dev.WebUrl = https://d2kcn6pne6ts5i.cloudfront.net</span></pre></li>
+  <li><strong>Lost the outputs?</strong> Ask CloudFormation for any of them.
+<pre class="term"><span class="p">$ </span>aws cloudformation describe-stacks --stack-name TalentMatch-dev \
+    --query "Stacks[0].Outputs[?OutputKey=='ApiUrl'].OutputValue" --output text
+<span class="c"># or: aws apigatewayv2 get-apis --query "Items[?Name=='talentmatch-dev'].[ApiId,ApiEndpoint]" --output table</span>
+<span class="c"># or: npx cdk deploy TalentMatch-dev --outputs-file cdk-outputs.json</span></pre></li>
+</ol>
+
+<h3>The 7-test checklist</h3>
+<div class="tw"><table>
+  <tr><th>#</th><th>Test</th><th>How</th><th>Expected</th></tr>
+  <tr><td>1</td><td>Page loads</td><td>Open the <code>WebUrl</code></td><td>"TalentMatch", then "API ok · dev · v0.1.0"</td></tr>
+  <tr><td>2</td><td>Generated config</td><td><code>WebUrl/config.json</code></td><td>Real API URL and <code>"stage": "dev"</code></td></tr>
+  <tr><td>3</td><td>Deep link</td><td>Open <code>WebUrl/jobs/123</code>, refresh</td><td>Loads and shows <code>Path: /jobs/123</code></td></tr>
+  <tr><td>4</td><td>Bucket is private</td><td><code>curl -I</code> the S3 URL directly</td><td><code>403 Forbidden</code></td></tr>
+  <tr><td>5</td><td>CORS locally</td><td><code>npm run dev</code> in <code>frontend/</code></td><td>localhost shows "API ok"</td></tr>
+  <tr><td>6</td><td>CORS header</td><td>DevTools → Network → <code>health</code> → Headers</td><td><code>access-control-allow-origin</code> = your origin</td></tr>
+  <tr><td>7</td><td>Logs</td><td><code>aws logs tail /talentmatch/dev/api --follow</code> + refresh</td><td>One JSON line per load, with <code>request_id</code></td></tr>
+</table></div>
+
+<h3>What does all this cost?</h3>
+<div class="tw"><table>
+  <tr><th>Service</th><th>Free allowance</th><th>Our usage</th><th class="num">Cost</th></tr>
+  <tr><td>CloudFront</td><td>1 TB out + 10M requests / month, always free</td><td>~222 KB per page load</td><td class="num">$0</td></tr>
+  <tr><td>CloudFront invalidation</td><td>1,000 paths / month</td><td><code>/*</code> = 1 path per deploy</td><td class="num">$0</td></tr>
+  <tr><td>S3 web bucket</td><td>Small free tier, then ~$0.025 / GB-month</td><td>&lt; 1 MB</td><td class="num">&lt; $0.01</td></tr>
+  <tr><td>BucketDeployment / auto-delete Lambdas</td><td>Lambda free tier</td><td>Run once per deploy/destroy</td><td class="num">$0</td></tr>
+  <tr class="total"><td>Total</td><td></td><td></td><td class="num">≈ $0</td></tr>
+</table></div>
+<div class="box danger"><span class="label">Costs money</span>
+  <p>None of this charges while idle. What <em>would</em> cost money is adding <strong>WAF</strong> ($5+/month) or a custom domain with Route 53 ($0.50/month per hosted zone). Both are in the plan's "After POC" list, not now.</p>
+</div>
+</section>
+
+<!-- ============================== 4.9 ============================== -->
+<section id="s9">
+<h2><span class="n">4.9</span>Explore more</h2>
+<div class="box explore"><span class="label">Explore more</span>
+  <ul class="check">
+    <li><strong>Watch the cache work.</strong> Run this twice and compare the <code>x-cache</code> header: <code>Miss from cloudfront</code>, then <code>Hit from cloudfront</code>.
+<pre class="term"><span class="p">$ </span>curl -sI https://d2kcn6pne6ts5i.cloudfront.net/ | grep -i -E 'x-cache|x-amz-cf-pop|age'
+<span class="o">x-cache: Hit from cloudfront
+x-amz-cf-pop: BOM78-P1      <span class="c"># the edge you hit (BOM = Mumbai)</span>
+age: 312                    <span class="c"># seconds this copy has been cached</span></span></pre></li>
+    <li><strong>See the fallback status.</strong> <code>curl -sI https://d2kcn6pne6ts5i.cloudfront.net/jobs/123</code> returns <code>200</code> and <code>content-type: text/html</code>, even though no such file exists.</li>
+    <li><strong>Trigger a preflight with curl</strong>, to see what the browser sees:
+<pre class="term"><span class="p">$ </span>curl -si -X OPTIONS $API/v1/jobs \
+    -H 'Origin: https://d2kcn6pne6ts5i.cloudfront.net' \
+    -H 'Access-Control-Request-Method: POST' | grep -i access-control</pre>
+      Then try <code>-H 'Origin: https://evil.example'</code> and notice the allow-origin header is missing.</li>
+    <li><strong>CloudFront console → your distribution → Monitoring</strong>: requests, bytes and the cache hit rate.</li>
+    <li><strong>CloudFront console → Invalidations</strong>: one <code>/*</code> entry per deploy, created by BucketDeployment.</li>
+    <li><strong>S3 console → web bucket → Permissions</strong>: read the generated bucket policy and find the <code>AWS:SourceArn</code> condition and the <code>aws:SecureTransport</code> deny.</li>
+    <li><strong>Try <code>http://</code></strong>: <code>curl -sI http://d2kcn6pne6ts5i.cloudfront.net/</code> gives a <code>301</code> to https (<code>REDIRECT_TO_HTTPS</code>).</li>
+    <li><strong>Run Lighthouse</strong> (Chrome DevTools → Lighthouse) on the WebUrl and note the score. Sprint 13 improves it.</li>
+  </ul>
+</div>
+</section>
+
+<!-- ============================== Q&A ============================== -->
+<section id="qa">
+<h2><span class="n">4.10</span>Check yourself</h2>
+<p>Try to answer in your head first, then click to reveal.</p>
+<div class="qa-list">
+  <details class="qa"><summary>Why don't we need a web server for the UI?</summary><div class="a">The UI is static: after <code>npm run build</code> it's just files (<code>index.html</code>, JS, CSS) that are the same for everyone. All logic runs in the browser or in the API. Storage (S3) plus delivery (CloudFront) is enough.</div></details>
+  <details class="qa"><summary>What's the difference between a bucket, an object and a key?</summary><div class="a">A bucket is the container (<code>talentmatch-dev-webbucket…</code>), an object is one stored file, and the key is the object's full name inside the bucket, e.g. <code>assets/index-laRIqOoM.js</code>. S3 has no real folders; the slash is just part of the key.</div></details>
+  <details class="qa"><summary>Why is the web bucket private, and what lets CloudFront read it anyway?</summary><div class="a">Private means nobody can read or leak files directly, and all traffic goes through HTTPS and the CDN. CloudFront reads it through <strong>Origin Access Control</strong>: it signs requests, and the bucket policy allows <code>s3:GetObject</code> only for <code>cloudfront.amazonaws.com</code> with <code>AWS:SourceArn</code> = our distribution.</div></details>
+  <details class="qa"><summary>Why do we map <strong>403</strong> (not just 404) to <code>index.html</code>?</summary><div class="a">With OAC, CloudFront may only <code>GetObject</code>, not <code>ListBucket</code>. For a missing key, S3 answers 403 instead of 404, so it doesn't reveal whether the key exists. Without the 403 rule, deep links like <code>/jobs/123</code> would show an error after refresh.</div></details>
+  <details class="qa"><summary>What does <code>distributionPaths: ['/*']</code> do, and does it cost money?</summary><div class="a">After uploading new files, BucketDeployment creates a CloudFront invalidation for every path, so edges drop old copies and serve the new build. <code>/*</code> counts as one path, and 1,000 paths a month are free, so it costs $0.</div></details>
+  <details class="qa"><summary>curl to the API worked, but the browser said "Failed to fetch". Why?</summary><div class="a">CORS. The page's origin (CloudFront or localhost) differs from the API's origin. Browsers block reading cross-origin responses unless the server sends <code>Access-Control-Allow-Origin</code> for that origin. curl doesn't enforce CORS, because only browsers do.</div></details>
+  <details class="qa"><summary>Why must the CloudFront distribution be created before the HTTP API in our code?</summary><div class="a">The API's <code>corsPreflight.allowOrigins</code> uses <code>webUrl</code>, which comes from <code>web.distributionDomainName</code>. You can't use a variable before it exists. CloudFormation also gets the dependency order right from that reference.</div></details>
+  <details class="qa"><summary>Why don't we put the API URL into the React code at build time?</summary><div class="a">The URL only exists after the API is deployed, and it differs per stage and after every fresh deploy. With a runtime <code>config.json</code> written by <code>Source.jsonData</code>, one build works everywhere, and CDK fills in the right URL automatically.</div></details>
+  <details class="qa"><summary>Localhost shows "Failed to fetch" after you destroyed and redeployed, but the CloudFront site works. What's wrong?</summary><div class="a">The local <code>frontend/public/config.json</code> still has the old API URL (in our case <code>h16tw1z5r0</code> instead of <code>1ezo0amr36</code>). The deployed site regenerates its config, but the local file doesn't. Paste the new <code>ApiUrl</code> output into it.</div></details>
+  <details class="qa"><summary>You see <code>npm error Missing script: "test"</code> right after a successful frontend build. What happened?</summary><div class="a">You were still inside <code>frontend/</code>, whose <code>package.json</code> has no <code>test</code> script. <code>npm</code> only reads the <code>package.json</code> in the current folder. <code>cd ..</code> to the root and run <code>npm test</code> there.</div></details>
+  <details class="qa"><summary>After <code>cdk destroy</code>, a bucket named <code>cdk-hnb659fds-assets-…</code> remains. Should you delete it?</summary><div class="a">No. It's the CDK bootstrap bucket from the <code>CDKToolkit</code> stack, and every deploy uploads its zips there first. Deleting it breaks <code>cdk deploy</code> until you re-bootstrap. It costs fractions of a cent. Clean old assets with <code>cdk gc</code> if ever needed.</div></details>
+  <details class="qa"><summary>Why does <code>autoDeleteObjects: true</code> exist? What would happen without it?</summary><div class="a">S3 refuses to delete a bucket that still has objects, so <code>cdk destroy</code> would fail with "bucket not empty". The option adds a custom-resource Lambda that empties the bucket first. We only use it because dev data is disposable.</div></details>
+</div>
+</section>
+
+<nav class="pager" aria-label="Previous and next chapter">
+  <a class="prev" href="03-lambda-and-the-health-api.html"><small>← Previous</small>3 · Lambda and the Health API</a>
+  <a class="next" href="05-dynamodb-explained.html"><small>Next →</small>5 · DynamoDB explained</a>
+</nav>
+</main>
+</body>
+</html>

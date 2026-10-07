@@ -1,0 +1,516 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Infrastructure as Code with CDK</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+  <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah" d="M0,0 L10,5 L0,10 z"/></marker>
+  <marker id="arb" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah blue" d="M0,0 L10,5 L0,10 z"/></marker>
+  <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah red" d="M0,0 L10,5 L0,10 z"/></marker>
+  <marker id="arg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah green" d="M0,0 L10,5 L0,10 z"/></marker>
+</defs></svg>
+
+<nav class="topbar" aria-label="Chapters"><div class="in">
+  <a class="home" href="index.html">TalentMatch book</a>
+  <a href="00-plan-and-design.html">0 Plan</a>
+  <a href="01-aws-basics-and-account-setup.html">1 AWS</a>
+  <a class="here" href="02-infrastructure-as-code-with-cdk.html">2 CDK</a>
+  <a href="03-lambda-and-the-health-api.html">3 Lambda</a>
+  <a href="04-hosting-the-ui-s3-cloudfront.html">4 UI hosting</a>
+  <a href="05-dynamodb-explained.html">5 DynamoDB</a>
+  <a href="06-building-the-jobs-api.html">6 Jobs API</a>
+  <a href="07-testing-debugging-and-habits.html">7 Debugging</a>
+</div></nav>
+
+<main>
+<header class="hero">
+  <div class="num">02</div>
+  <div class="kicker">Chapter 2 · Sprint 1 foundations</div>
+  <h1>Infrastructure as code with AWS CDK</h1>
+  <p class="sub">Instead of clicking around the AWS console, we write our whole cloud setup as TypeScript code. One command builds it; one command deletes it. This chapter explains how that works, from your <code>.ts</code> file to real resources in Mumbai.</p>
+  <div class="learn">
+    <h3>What you will learn</h3>
+    <ul>
+      <li>Why infrastructure as code beats clicking</li>
+      <li>CloudFormation: templates, stacks, change sets</li>
+      <li>CDK: App, Stack and Construct</li>
+      <li>What <code>bin/</code> and <code>lib/</code> are for</li>
+      <li>Bootstrap and the CDKToolkit stack</li>
+      <li>Every CDK command you need</li>
+      <li>How to read a <code>cdk diff</code></li>
+      <li>Removal policies, tags and outputs</li>
+    </ul>
+  </div>
+  <nav class="toc" aria-label="In this chapter">
+    <a href="#why">2.1 Why IaC</a><a href="#cfn">2.2 CloudFormation</a><a href="#cdk">2.3 CDK</a>
+    <a href="#binlib">2.4 bin and lib</a><a href="#bootstrap">2.5 Bootstrap</a><a href="#commands">2.6 Commands</a>
+    <a href="#diff">2.7 Reading a diff</a><a href="#policies">2.8 Removal, tags, outputs</a><a href="#sam">2.9 SAM vs CDK</a><a href="#qa">Check yourself</a>
+  </nav>
+</header>
+
+<!-- ===================== 2.1 ===================== -->
+<section id="why">
+<h2><span class="n">2.1</span>Why infrastructure as code?</h2>
+<p class="lead">If your cloud setup lives only in clicks, nobody can repeat it, review it or undo it. If it lives in code, all three are easy.</p>
+
+<div class="box simple"><span class="label">In simple words</span>
+<p>Building with LEGO, you can build a castle from memory, or you can follow the <strong>instruction booklet</strong>. With the booklet, anyone can build the exact same castle again, you can see exactly what changed between version 1 and version 2, and if you knock it down you can rebuild it in minutes.</p>
+<p>Infrastructure as code (IaC) is the instruction booklet for your cloud. Our booklet is <code>lib/talentmatch-stack.ts</code>.</p>
+</div>
+
+<figure>
+  <svg viewBox="0 0 700 220" role="img" aria-label="Clicking in the console versus infrastructure as code">
+    <text class="gt" x="20" y="24">CLICKING IN THE CONSOLE</text>
+    <rect class="bx bad" x="20" y="36" width="310" height="164" rx="12"/>
+    <text class="t" x="36" y="62">Hard to repeat</text><text class="s" x="36" y="80">"which 40 buttons did I click for dev?"</text>
+    <text class="t" x="36" y="108">No history</text><text class="s" x="36" y="126">nobody knows who changed what, or why</text>
+    <text class="t" x="36" y="154">Leftovers</text><text class="s" x="36" y="172">forgotten resources keep costing money</text>
+    <text class="gt" x="370" y="24">INFRASTRUCTURE AS CODE (CDK)</text>
+    <rect class="bx user" x="370" y="36" width="310" height="164" rx="12"/>
+    <text class="t" x="386" y="62">Repeatable</text><text class="s" x="386" y="80">same code makes TalentMatch-dev and -prod</text>
+    <text class="t" x="386" y="108">Reviewed in Git</text><text class="s" x="386" y="126">git diff shows every change</text>
+    <text class="t" x="386" y="154">Clean delete</text><text class="s" x="386" y="172">cdk destroy removes everything it made</text>
+  </svg>
+  <figcaption>Figure 2.1 · Clicking is fine for a quick look. Anything we keep is written as code.</figcaption>
+</figure>
+
+<h3>Technical terms</h3>
+<div class="tw"><table class="terms">
+  <tr><th>Term</th><th>Simple meaning</th><th>Example from our project</th></tr>
+  <tr><td>Infrastructure</td><td>The cloud pieces your app runs on</td><td>Lambda, API, bucket, table</td></tr>
+  <tr><td>Infrastructure as code (IaC)</td><td>Describing that infrastructure in files</td><td><code>lib/talentmatch-stack.ts</code></td></tr>
+  <tr><td>Declarative</td><td>You say <em>what</em> you want, not each step</td><td>"a table with PK and SK" (AWS works out how)</td></tr>
+  <tr><td>Reproducible</td><td>Builds the same thing every time</td><td>dev and prod come from one class</td></tr>
+</table></div>
+</section>
+
+<!-- ===================== 2.2 ===================== -->
+<section id="cfn">
+<h2><span class="n">2.2</span>CloudFormation: the engine underneath</h2>
+<p class="lead">CDK does not create resources itself. It writes a CloudFormation template, and CloudFormation does the building.</p>
+
+<div class="box simple"><span class="label">In simple words</span>
+<p>A restaurant: you (CDK) write the <strong>order slip</strong> (the template). The <strong>kitchen</strong> (CloudFormation) reads it and cooks every dish. All dishes from one slip are one <strong>table's meal</strong> (a stack). If one dish burns, the kitchen throws the whole order away and puts the table back as it was (a rollback).</p>
+</div>
+
+<div class="box tech"><span class="label">Technical view</span>
+<ul>
+  <li>A <strong>template</strong> is a JSON or YAML file listing resources and their settings.</li>
+  <li>A <strong>stack</strong> is one deployed copy of a template. We have <code>TalentMatch-dev</code>, plus <code>CDKToolkit</code> from bootstrap.</li>
+  <li>A <strong>change set</strong> is CloudFormation's preview: "here is what I will add, change or replace". <code>cdk diff</code> uses one.</li>
+  <li><strong>Events</strong> are the live log of a deploy: <code>CREATE_IN_PROGRESS</code>, <code>CREATE_COMPLETE</code>…</li>
+  <li><strong>Rollback</strong>: if any resource fails, CloudFormation undoes the whole deploy, so you never end up half-built.</li>
+  <li><strong>Drift</strong> is when someone changes a resource by hand in the console, so reality no longer matches the template.</li>
+</ul>
+</div>
+
+<figure>
+  <svg viewBox="0 0 700 250" role="img" aria-label="Lifecycle of a CloudFormation stack">
+    <rect class="bx code" x="10" y="20" width="130" height="56" rx="10"/><text class="t" x="24" y="44">Template</text><text class="s" x="24" y="62">the order slip</text>
+    <path class="w" d="M140 48 H180" marker-end="url(#ar)"/>
+    <rect class="bx warn" x="185" y="20" width="140" height="56" rx="10"/><text class="t" x="199" y="44">Change set</text><text class="s" x="199" y="62">preview of changes</text>
+    <path class="w" d="M325 48 H365" marker-end="url(#ar)"/>
+    <rect class="bx aws" x="370" y="20" width="150" height="56" rx="10"/><text class="t" x="384" y="44">Deploy</text><text class="s" x="384" y="62">events stream live</text>
+    <path class="w green" d="M520 40 H560" marker-end="url(#arg)"/><text class="lb" x="524" y="32">all ok</text>
+    <rect class="bx user" x="565" y="14" width="125" height="48" rx="10"/><text class="t" x="579" y="36">COMPLETE</text><text class="s" x="579" y="52">stack is live</text>
+    <path class="w red" d="M445 76 V120" marker-end="url(#arr)"/><text class="lb" x="452" y="104">one fails</text>
+    <rect class="bx bad" x="370" y="124" width="150" height="56" rx="10"/><text class="t" x="384" y="148">ROLLBACK</text><text class="s" x="384" y="166">undo everything</text>
+    <rect class="bx warn" x="565" y="124" width="125" height="56" rx="10"/><text class="t" x="579" y="148">Drift</text><text class="s" x="579" y="166">hand edits later</text>
+    <path class="w dash" d="M627 62 V120" marker-end="url(#ar)"/>
+    <text class="s" x="10" y="220">A stack is all-or-nothing: either every resource is created, or none of them stay.</text>
+  </svg>
+  <figcaption>Figure 2.2 · A template becomes a change set, then a deploy. One failure rolls the whole stack back. Console edits cause drift.</figcaption>
+</figure>
+
+<div class="box warn"><span class="label">Watch out</span>
+<p>Never change or delete a CDK-made resource by hand in the console. That causes drift, and the next <code>cdk deploy</code> or <code>cdk destroy</code> can fail. The rule: <strong>anything CDK created, change in code; remove with <code>cdk destroy</code></strong>.</p>
+</div>
+
+<h3>Technical terms</h3>
+<div class="tw"><table class="terms">
+  <tr><th>Term</th><th>Simple meaning</th><th>Example from our project</th></tr>
+  <tr><td>CloudFormation</td><td>The AWS service that builds stacks from templates</td><td>Reads <code>cdk.out/TalentMatch-dev.template.json</code></td></tr>
+  <tr><td>Template</td><td>The order slip: list of resources</td><td>About 200 lines of JSON for our stack</td></tr>
+  <tr><td>Stack</td><td>One deployed copy of a template</td><td><code>TalentMatch-dev</code></td></tr>
+  <tr><td>Change set</td><td>Preview of what a deploy will do</td><td>What <code>cdk diff</code> shows</td></tr>
+  <tr><td>Stack events</td><td>Live log of a deploy</td><td>CloudFormation console → TalentMatch-dev → Events</td></tr>
+  <tr><td>Rollback</td><td>Undo a failed deploy</td><td>A bad setting puts the stack back as it was</td></tr>
+  <tr><td>Drift</td><td>Reality differs from the template</td><td>Deleting the web bucket by hand</td></tr>
+  <tr><td>Logical ID</td><td>The resource's name inside the template</td><td><code>ApiLogs3D05D88B</code></td></tr>
+  <tr><td>Physical ID</td><td>The real name AWS gave it</td><td><code>TalentMatch-dev-ApiFunctionCE271BD4-KWfgExCKxT3a</code></td></tr>
+</table></div>
+</section>
+
+<!-- ===================== 2.3 ===================== -->
+<section id="cdk">
+<h2><span class="n">2.3</span>CDK: App, Stack and Construct</h2>
+<p class="lead">CDK lets you write CloudFormation with a real programming language. Everything is a tree of building blocks called constructs.</p>
+
+<div class="box simple"><span class="label">In simple words</span>
+<p>Think of a family tree. At the top is the <strong>App</strong> (grandparent). Its children are <strong>Stacks</strong> (parents): TalentMatch-dev and TalentMatch-prod. Their children are <strong>Constructs</strong> (kids): the table, the Lambda, the API. Each kid knows who its parent is, and that is how CDK knows which stack each resource belongs to.</p>
+</div>
+
+<figure>
+  <svg viewBox="0 0 700 300" role="img" aria-label="The construct tree of our app">
+    <rect class="bx code" x="270" y="10" width="160" height="50" rx="10"/><text class="t" x="284" y="32">App</text><text class="s" x="284" y="49">new cdk.App()</text>
+    <path class="w" d="M350 60 V80 H175 V100" marker-end="url(#ar)"/>
+    <path class="w" d="M350 60 V80 H525 V100" marker-end="url(#ar)"/>
+    <rect class="bx aws" x="85" y="104" width="180" height="50" rx="10"/><text class="t" x="99" y="126">TalentMatch-dev</text><text class="s" x="99" y="143">Stack, stage = dev</text>
+    <rect class="bx aws" x="435" y="104" width="180" height="50" rx="10"/><text class="t" x="449" y="126">TalentMatch-prod</text><text class="s" x="449" y="143">Stack, stage = prod</text>
+    <path class="w" d="M175 154 V176 H60 V196" marker-end="url(#ar)"/>
+    <path class="w" d="M175 154 V196" marker-end="url(#ar)"/>
+    <path class="w" d="M175 154 V176 H290 V196" marker-end="url(#ar)"/>
+    <rect class="bx" x="10" y="200" width="100" height="44" rx="8"/><text class="t" x="22" y="220">Table</text><text class="s" x="22" y="236">TableV2</text>
+    <rect class="bx" x="125" y="200" width="100" height="44" rx="8"/><text class="t" x="137" y="220">ApiFunction</text><text class="s" x="137" y="236">Lambda</text>
+    <rect class="bx" x="240" y="200" width="100" height="44" rx="8"/><text class="t" x="252" y="220">HttpApi</text><text class="s" x="252" y="236">API Gateway</text>
+    <text class="s" x="10" y="270">…plus ApiLogs, WebBucket, WebDistribution, WebDeployment</text>
+    <rect class="bx ghost" x="435" y="200" width="180" height="44" rx="8"/><text class="t" x="449" y="220">same children</text><text class="s" x="449" y="236">defined, not deployed yet</text>
+    <path class="w dash" d="M525 154 V196" marker-end="url(#ar)"/>
+  </svg>
+  <figcaption>Figure 2.3 · Our construct tree. One App holds two stacks made from the same class; each stack holds our resources.</figcaption>
+</figure>
+
+<h3>Three levels of constructs</h3>
+<div class="tw"><table>
+  <tr><th>Level</th><th>What it is</th><th>Example</th></tr>
+  <tr><td><span class="pill amber">L1</span></td><td>A raw CloudFormation resource, every setting by hand. Names start with <code>Cfn</code>.</td><td><code>new s3.CfnBucket(...)</code></td></tr>
+  <tr><td><span class="pill">L2</span></td><td>A friendly wrapper with safe defaults and helper methods. <strong>What we use.</strong></td><td><code>new s3.Bucket(...)</code>, <code>table.grantReadWriteData(fn)</code></td></tr>
+  <tr><td><span class="pill green">L3</span></td><td>A pattern: several resources wired together for you</td><td><code>BucketDeployment</code> (bucket upload + cache clear + helper Lambda)</td></tr>
+</table></div>
+
+<div class="box tech"><span class="label">Props, stage and tokens</span>
+<p><strong>Props</strong> are the settings you pass to a construct. Our stack has its own prop, <code>stage: 'dev' | 'prod'</code>, so one class can build two different stacks (for example, prod keeps its table when deleted).</p>
+<p>A <strong>token</strong> is a placeholder for a value that only exists after deploy. <code>table.tableName</code> looks like <code>${Token[TOKEN.123]}</code> in TypeScript. In the template it becomes <code>{"Ref": "TableCD117FA1"}</code>, and CloudFormation fills in the real name, <code>TalentMatch-dev-TableCD117FA1-1MYDSRWJRNU0A</code>, at deploy time.</p>
+</div>
+
+<h3>Technical terms</h3>
+<div class="tw"><table class="terms">
+  <tr><th>Term</th><th>Simple meaning</th><th>Example from our project</th></tr>
+  <tr><td>CDK</td><td>Cloud Development Kit: write infrastructure in TypeScript</td><td><code>aws-cdk-lib</code> in package.json</td></tr>
+  <tr><td>App</td><td>The root of the tree</td><td><code>const app = new cdk.App()</code></td></tr>
+  <tr><td>Stack</td><td>A group of resources deployed together</td><td><code>TalentmatchStack</code></td></tr>
+  <tr><td>Construct</td><td>Any building block in the tree</td><td><code>new lambda.Function(this, 'ApiFunction', …)</code></td></tr>
+  <tr><td>Scope</td><td>The parent you attach a construct to</td><td><code>this</code> = "put it in this stack"</td></tr>
+  <tr><td>ID</td><td>The construct's name inside its parent</td><td><code>'ApiFunction'</code></td></tr>
+  <tr><td>Props</td><td>The settings object</td><td><code>{ env, stage }</code></td></tr>
+  <tr><td>Token</td><td>A value that is filled in at deploy time</td><td><code>table.tableName</code></td></tr>
+  <tr><td>Asset</td><td>A local file or folder CDK uploads for you</td><td><code>src/api</code> (zipped), <code>frontend/dist</code></td></tr>
+  <tr><td><code>cdk.out</code></td><td>The folder where synth writes templates and assets</td><td><code>cdk.out/TalentMatch-dev.template.json</code></td></tr>
+</table></div>
+</section>
+
+<!-- ===================== 2.4 ===================== -->
+<section id="binlib">
+<h2><span class="n">2.4</span>bin/ and lib/: from TypeScript to real resources</h2>
+<p class="lead"><code>bin/</code> decides which stacks exist. <code>lib/</code> describes what is inside a stack. Neither one runs in AWS. Only <code>src/</code> runs in the cloud.</p>
+
+<figure>
+  <svg viewBox="0 0 700 300" role="img" aria-label="Pipeline from TypeScript to AWS resources">
+    <text class="gt" x="10" y="20">ON YOUR MAC</text>
+    <rect class="bx code" x="10" y="32" width="160" height="58" rx="10"/><text class="t" x="24" y="56">bin/talentmatch.ts</text><text class="s" x="24" y="74">which stacks exist</text>
+    <path class="w" d="M170 61 H200" marker-end="url(#ar)"/>
+    <rect class="bx code" x="205" y="32" width="150" height="58" rx="10"/><text class="t" x="219" y="56">lib/…-stack.ts</text><text class="s" x="219" y="74">what is in a stack</text>
+    <path class="w" d="M355 61 H415" marker-end="url(#ar)"/><text class="lb" x="368" y="53">synth</text>
+    <rect class="bx data" x="420" y="32" width="270" height="58" rx="10"/><text class="t" x="434" y="56">cdk.out/</text><text class="s" x="434" y="74">template.json + asset zips</text>
+    <rect class="bx code" x="10" y="110" width="345" height="50" rx="10"/><text class="t" x="24" y="132">src/api/*.py  +  frontend/dist</text><text class="s" x="24" y="149">your app code, zipped as assets</text>
+    <path class="w dash" d="M355 135 H480 V94" marker-end="url(#ar)"/>
+    <path class="w blue" d="M630 90 V188" marker-end="url(#arb)"/><text class="lb" x="548" y="146">cdk deploy</text>
+    <rect class="grp" x="5" y="172" width="690" height="122" rx="12"/>
+    <text class="gt" x="20" y="194">IN AWS (ap-south-1)</text>
+    <rect class="bx aws" x="420" y="192" width="270" height="40" rx="10"/><text class="t" x="434" y="217">assets bucket + CloudFormation</text>
+    <path class="w blue" d="M555 232 V248" marker-end="url(#arb)"/>
+    <rect class="bx user" x="20" y="252" width="670" height="34" rx="10"/><text class="t" x="34" y="274">Real resources: Lambda · HTTP API · DynamoDB table · S3 bucket · CloudFront</text>
+  </svg>
+  <figcaption>Figure 2.4 · <code>bin</code> and <code>lib</code> run on your Mac and produce a template. <code>cdk deploy</code> uploads it with the asset zips, and CloudFormation builds the resources.</figcaption>
+</figure>
+
+<h3>bin/talentmatch.ts, line by line</h3>
+<p>This is the real file in your project today:</p>
+<div class="file">bin/talentmatch.ts</div>
+<pre class="code"><span class="c">#!/usr/bin/env node</span>
+<span class="k">import</span> * <span class="k">as</span> cdk <span class="k">from</span> <span class="s">'aws-cdk-lib/core'</span>;
+<span class="k">import</span> { TalentmatchStack } <span class="k">from</span> <span class="s">'../lib/talentmatch-stack'</span>;
+
+<span class="k">const</span> app = <span class="k">new</span> cdk.App();
+
+<span class="k">const</span> env = { account: process.env.CDK_DEFAULT_ACCOUNT, region: <span class="s">'ap-south-1'</span> };
+
+<span class="k">for</span> (<span class="k">const</span> stage <span class="k">of</span> [<span class="s">'dev'</span>, <span class="s">'prod'</span>] <span class="k">as const</span>) {
+  <span class="k">new</span> TalentmatchStack(app, <span class="s">`TalentMatch-${stage}`</span>, { env,  stage });
+}</pre>
+
+<div class="tw"><table>
+  <tr><th>Line</th><th>What it does</th></tr>
+  <tr><td><code>#!/usr/bin/env node</code></td><td>Says "run me with Node". CDK actually runs the file through <code>cdk.json</code>: <code>"app": "npx tsc &amp;&amp; npx tsx bin/talentmatch.ts"</code> (type-check first, then run).</td></tr>
+  <tr><td><code>import * as cdk</code></td><td>Brings in CDK's core library (<code>App</code>, <code>Stack</code>, <code>Tags</code>, <code>Duration</code>…).</td></tr>
+  <tr><td><code>import { TalentmatchStack }</code></td><td>Brings in our blueprint class from <code>lib/</code>.</td></tr>
+  <tr><td><code>new cdk.App()</code></td><td>Creates the root of the construct tree (Figure 2.3).</td></tr>
+  <tr><td><code>env = {…}</code></td><td>Where to deploy. <code>CDK_DEFAULT_ACCOUNT</code> is filled in from your login (143495498376). The region is fixed to Mumbai so a wrong CLI setting can't send it elsewhere.</td></tr>
+  <tr><td><code>for (const stage of ['dev', 'prod'] as const)</code></td><td>Loops twice. <code>as const</code> tells TypeScript the values are exactly <code>'dev'</code> or <code>'prod'</code>, matching the stack's <code>stage</code> prop.</td></tr>
+  <tr><td><code>new TalentmatchStack(app, …)</code></td><td>Builds one stack per stage: <code>TalentMatch-dev</code> and <code>TalentMatch-prod</code>. Defining a stack does not deploy it.</td></tr>
+</table></div>
+
+<div class="box warn"><span class="label">Watch out</span>
+<p>The line <code>cdk.Tags.of(app).add('project', 'talentmatch');</code> is missing from the end of this file. Without it, resources get <code>stage</code> tags (from the stack) but no <code>project</code> tag, so Cost Explorer can't filter by project. Add it after the <code>for</code> loop.</p>
+</div>
+
+<h3>The project folder layout</h3>
+<pre class="code">talentmatch/
+├── bin/talentmatch.ts         <span class="c"># CDK app: which stacks exist</span>
+├── lib/talentmatch-stack.ts   <span class="c"># CDK stack: every AWS resource</span>
+├── src/api/                   <span class="c"># Python Lambda code (app.py, jobs.py, errors.py)</span>
+├── frontend/                  <span class="c"># Vite + React app; npm run build → frontend/dist</span>
+├── test/talentmatch.test.ts   <span class="c"># CDK tests (Jest, npm test)</span>
+├── tests/api/                 <span class="c"># Python tests (python -m unittest)</span>
+├── docs/                      <span class="c"># journal, ADRs, this book</span>
+├── cdk.json                   <span class="c"># tells CDK how to run bin/talentmatch.ts</span>
+├── cdk.out/                   <span class="c"># generated by synth; never edit, never commit</span>
+└── package.json               <span class="c"># aws-cdk-lib, constructs, typescript, jest</span></pre>
+
+<h3>Technical terms</h3>
+<div class="tw"><table class="terms">
+  <tr><th>Term</th><th>Simple meaning</th><th>Example from our project</th></tr>
+  <tr><td><code>bin/</code></td><td>The entry point: creates the App and its stacks</td><td><code>bin/talentmatch.ts</code></td></tr>
+  <tr><td><code>lib/</code></td><td>Stack classes (blueprints)</td><td><code>lib/talentmatch-stack.ts</code></td></tr>
+  <tr><td><code>cdk.json</code></td><td>Config: how to run the app, feature flags</td><td><code>"app": "npx tsc &amp;&amp; npx tsx bin/talentmatch.ts"</code></td></tr>
+  <tr><td>Environment (<code>env</code>)</td><td>Which account + region a stack goes to</td><td>143495498376 / ap-south-1</td></tr>
+  <tr><td><code>CDK_DEFAULT_ACCOUNT</code></td><td>Account number CDK reads from your login</td><td>Fails if the session expired</td></tr>
+</table></div>
+</section>
+
+<!-- ===================== 2.5 ===================== -->
+<section id="bootstrap">
+<h2><span class="n">2.5</span>Bootstrap: the CDKToolkit stack</h2>
+<p class="lead">Before CDK can deploy into an account and region the first time, it needs a small "workshop" there. Making it is called bootstrapping.</p>
+
+<div class="box simple"><span class="label">In simple words</span>
+<p>Before builders start a house, they set up a <strong>site office</strong> and a <strong>storage shed</strong> for bricks. The shed stays for as long as they keep building. Bootstrap creates that shed: an S3 bucket where CDK drops your code zips before CloudFormation picks them up, plus roles that are allowed to deploy.</p>
+</div>
+
+<pre class="term"><span class="c"># Run once per account + region (we already did this)</span>
+<span class="p">$ </span>npx cdk bootstrap aws://143495498376/ap-south-1
+
+<span class="c"># Find the assets bucket name</span>
+<span class="p">$ </span>aws cloudformation describe-stacks --stack-name CDKToolkit \
+    --query "Stacks[0].Outputs[?OutputKey=='BucketName'].OutputValue" --output text
+<span class="o">cdk-hnb659fds-assets-143495498376-ap-south-1</span>
+
+<span class="c"># Look inside: hash-named .zip and .json files from your deploys</span>
+<span class="p">$ </span>aws s3 ls s3://cdk-hnb659fds-assets-143495498376-ap-south-1 --recursive --human-readable</pre>
+
+<div class="tw"><table>
+  <tr><th>Part of the name</th><th>Meaning</th></tr>
+  <tr><td><code>cdk</code></td><td>Created by CDK</td></tr>
+  <tr><td><code>hnb659fds</code></td><td>The default bootstrap "qualifier", the same for everyone</td></tr>
+  <tr><td><code>assets</code></td><td>Holds deploy assets: zipped <code>src/api</code> and <code>frontend/dist</code></td></tr>
+  <tr><td><code>143495498376</code></td><td>Our account</td></tr>
+  <tr><td><code>ap-south-1</code></td><td>Mumbai</td></tr>
+</table></div>
+
+<div class="box story"><span class="label">Real story from our build</span>
+<p>After <code>cdk destroy TalentMatch-dev</code>, one bucket was still there: <code>cdk-hnb659fds-assets-143495498376-ap-south-1</code>. The question was "can I delete it?". <strong>No.</strong> It belongs to the <code>CDKToolkit</code> stack, not to TalentMatch-dev, so destroy correctly leaves it alone. Deleting it would break every future <code>cdk deploy</code> until you bootstrap again. It costs fractions of a cent. To clean old files safely, use <code>npx cdk gc --unstable=gc</code>, never manual deletion.</p>
+</div>
+
+<h3>Technical terms</h3>
+<div class="tw"><table class="terms">
+  <tr><th>Term</th><th>Simple meaning</th><th>Example from our project</th></tr>
+  <tr><td>Bootstrap</td><td>One-time setup so CDK can deploy</td><td><code>npx cdk bootstrap aws://143495498376/ap-south-1</code></td></tr>
+  <tr><td>CDKToolkit</td><td>The stack that bootstrap creates</td><td>The only stack left when we "park" the account</td></tr>
+  <tr><td>Assets bucket</td><td>Where CDK uploads code zips and templates</td><td><code>cdk-hnb659fds-assets-…</code></td></tr>
+  <tr><td><code>cdk gc</code></td><td>Garbage collection: deletes unused old assets safely</td><td><code>npx cdk gc --unstable=gc</code></td></tr>
+</table></div>
+</section>
+
+<!-- ===================== 2.6 ===================== -->
+<section id="commands">
+<h2><span class="n">2.6</span>Every CDK command you need</h2>
+<p class="lead">A handful of commands cover almost all daily work. Run them from the project root.</p>
+
+<figure>
+  <svg viewBox="0 0 700 200" role="img" aria-label="The daily command loop">
+    <rect class="bx code" x="10" y="70" width="100" height="56" rx="10"/><text class="t" x="24" y="94">edit code</text><text class="s" x="24" y="112">lib/ or src/</text>
+    <path class="w" d="M110 98 H135" marker-end="url(#ar)"/>
+    <rect class="bx" x="140" y="70" width="100" height="56" rx="10"/><text class="t" x="152" y="94">build + test</text><text class="s" x="152" y="112">npm run build</text>
+    <path class="w" d="M240 98 H265" marker-end="url(#ar)"/>
+    <rect class="bx" x="270" y="70" width="90" height="56" rx="10"/><text class="t" x="284" y="94">synth</text><text class="s" x="284" y="112">template</text>
+    <path class="w" d="M360 98 H385" marker-end="url(#ar)"/>
+    <rect class="bx warn" x="390" y="70" width="90" height="56" rx="10"/><text class="t" x="404" y="94">diff</text><text class="s" x="404" y="112">read it!</text>
+    <path class="w blue" d="M480 98 H505" marker-end="url(#arb)"/>
+    <rect class="bx aws" x="510" y="70" width="85" height="56" rx="10"/><text class="t" x="522" y="94">deploy</text><text class="s" x="522" y="112">to AWS</text>
+    <path class="w" d="M595 98 H615" marker-end="url(#ar)"/>
+    <rect class="bx user" x="620" y="70" width="70" height="56" rx="10"/><text class="t" x="630" y="94">test</text><text class="s" x="630" y="112">curl</text>
+    <path class="w dash" d="M655 70 V30 H60 V66" marker-end="url(#ar)"/><text class="lb" x="300" y="24">next change</text>
+    <rect class="bx bad" x="510" y="150" width="180" height="40" rx="10"/><text class="t" x="524" y="175">destroy at end of day</text>
+  </svg>
+  <figcaption>Figure 2.5 · The loop we repeat every sprint: edit, build and test, synth, diff, deploy, test live. Destroy when you stop.</figcaption>
+</figure>
+
+<div class="tw"><table>
+  <tr><th>Command</th><th>What it does</th><th>When</th></tr>
+  <tr><td><code>npx cdk init app --language typescript</code></td><td>Creates a new CDK project (folder must be empty)</td><td>Once per project</td></tr>
+  <tr><td><code>npx cdk ls</code></td><td>Lists stacks in the app</td><td>Check bin/ works</td></tr>
+  <tr><td><code>npx cdk synth TalentMatch-dev</code></td><td>Prints the CloudFormation template and fills <code>cdk.out/</code></td><td>See what your code becomes</td></tr>
+  <tr><td><code>npx cdk diff TalentMatch-dev</code></td><td>Compares code with what is deployed</td><td><strong>Before every deploy</strong></td></tr>
+  <tr><td><code>npx cdk deploy TalentMatch-dev</code></td><td>Deploys (asks y/n for IAM changes)</td><td>After reading the diff</td></tr>
+  <tr><td><code>… deploy TalentMatch-dev --outputs-file cdk-outputs.json</code></td><td>Also saves outputs (URLs, names) to a file</td><td>When you need them later</td></tr>
+  <tr><td><code>… deploy TalentMatch-dev --hotswap</code></td><td>Updates Lambda code directly, skipping CloudFormation. Fast.</td><td>Dev only, code-only changes</td></tr>
+  <tr><td><code>npx cdk watch TalentMatch-dev</code></td><td>Redeploys on every save</td><td>Dev only</td></tr>
+  <tr><td><code>npx cdk destroy TalentMatch-dev</code></td><td>Deletes the stack and its resources</td><td>End of every session</td></tr>
+</table></div>
+
+<div class="box danger"><span class="label">Watch out with hotswap and watch</span>
+<p><code>--hotswap</code> and <code>watch</code> change resources behind CloudFormation's back on purpose. That's fine for dev experiments, but never use them on <code>TalentMatch-prod</code>.</p>
+</div>
+
+<div class="box story"><span class="label">Real story from our build</span>
+<p><strong>A missing asset.</strong> CDK zips <code>frontend/dist</code> on every synth (<code>Source.asset(...frontend/dist)</code>). If you forget <code>npm run build</code> in <code>frontend/</code>, synth fails with <em>Cannot find asset at …/frontend/dist</em>. The fix is to build the frontend first. It also explains why the Jest tests need <code>dist/</code> to exist.</p>
+</div>
+</section>
+
+<!-- ===================== 2.7 ===================== -->
+<section id="diff">
+<h2><span class="n">2.7</span>How to read a <code>cdk diff</code></h2>
+<p class="lead">The diff is the single most important safety check. It tells you exactly what AWS will create, change or replace.</p>
+
+<div class="box simple"><span class="label">In simple words</span>
+<p>Before a barber cuts, a good one shows you a picture: "this much off the top, this much off the sides". If the picture says "shave everything", you say stop. The diff is that picture.</p>
+</div>
+
+<pre class="term"><span class="o">Resources
+[+] AWS::DynamoDB::GlobalTable Table TableCD117FA1          </span><span class="c">← new</span><span class="o">
+[~] AWS::Lambda::Function ApiFunction ApiFunctionCE271BD4   </span><span class="c">← modified in place</span><span class="o">
+ └─ [~] Environment
+     └─ [+] TABLE_NAME: {"Ref":"TableCD117FA1"}
+[~] AWS::Logs::LogGroup ApiLogs ApiLogs3D05D88B replace    </span><span class="c">← destroyed and recreated!</span></pre>
+
+<div class="tw"><table>
+  <tr><th>Symbol</th><th>Meaning</th><th>Safe?</th></tr>
+  <tr><td><code>[+]</code></td><td>New resource</td><td><span class="pill green">usually</span> check cost</td></tr>
+  <tr><td><code>[~]</code></td><td>Changed in place</td><td><span class="pill green">usually</span></td></tr>
+  <tr><td><code>[~] … replace</code></td><td>Deleted and created again (new name, <strong>data lost</strong>)</td><td><span class="pill red">stop and think</span> on tables and buckets</td></tr>
+  <tr><td><code>[-]</code></td><td>Deleted</td><td><span class="pill amber">check why</span></td></tr>
+  <tr><td>IAM Statement Changes</td><td>Who gets which new permission</td><td><span class="pill amber">read every row</span></td></tr>
+</table></div>
+
+<div class="box tech"><span class="label">The "broadening" approval</span>
+<p>When a deploy adds IAM permissions, CDK stops and asks:</p>
+<pre class="term"><span class="o">Stack includes security-sensitive updates and "--require-approval" is set to 'broadening'.
+Do you wish to deploy these changes? (y/n)</span></pre>
+<p>"Broadening" means someone is getting <strong>more</strong> access. In Sprint 2 that was <code>table.grantReadWriteData(apiFn)</code>: check the Resource column shows <strong>our table's ARN and <code>…/index/*</code></strong> only, then type <code>y</code>.</p>
+</div>
+
+<div class="box story"><span class="label">Real story from our build</span>
+<p><strong>The unnamed log group.</strong> Our first log group had no <code>logGroupName</code>, so CloudFormation generated one like <code>TalentMatch-dev-ApiLogs3D05D88B-…</code>, and <code>aws logs tail /aws/lambda/…</code> failed with "log group does not exist". We added <code>logGroupName: `/talentmatch/${props.stage}/api`</code>. On a live stack the diff would show the log group as <strong>replace</strong>, because a log group can't be renamed in place, so the old logs go. That's harmless for logs, and a warning sign for tables.</p>
+<p><strong>The deploy that ran before it was stopped.</strong> In the very first session, a <code>cdk deploy</code> was rejected in the terminal, yet <code>TalentMatch-dev</code> showed <code>CREATE_COMPLETE</code> a moment later. The deploy had already started before the stop arrived. Lesson: once you press enter, check CloudFormation, not your memory: <code>aws cloudformation describe-stacks --stack-name TalentMatch-dev</code>.</p>
+</div>
+</section>
+
+<!-- ===================== 2.8 ===================== -->
+<section id="policies">
+<h2><span class="n">2.8</span>Removal policies, tags and outputs</h2>
+<p class="lead">Three small settings that make a big difference: what happens on delete, how costs are grouped, and how you find real names after deploy.</p>
+
+<figure>
+  <svg viewBox="0 0 700 220" role="img" aria-label="Removal policy on destroy">
+    <rect class="bx bad" x="250" y="10" width="200" height="44" rx="10"/><text class="t" x="264" y="37">cdk destroy runs</text>
+    <path class="w" d="M350 54 V74 H175 V94" marker-end="url(#ar)"/>
+    <path class="w" d="M350 54 V74 H525 V94" marker-end="url(#ar)"/>
+    <rect class="bx warn" x="60" y="98" width="230" height="50" rx="10"/><text class="t" x="74" y="120">RemovalPolicy.DESTROY</text><text class="s" x="74" y="138">dev table, log group, web bucket</text>
+    <rect class="bx user" x="410" y="98" width="230" height="50" rx="10"/><text class="t" x="424" y="120">RemovalPolicy.RETAIN</text><text class="s" x="424" y="138">prod table</text>
+    <path class="w red" d="M175 148 V168" marker-end="url(#arr)"/>
+    <path class="w green" d="M525 148 V168" marker-end="url(#arg)"/>
+    <rect class="bx bad" x="60" y="172" width="230" height="40" rx="10"/><text class="t" x="74" y="197">deleted with its data</text>
+    <rect class="bx user" x="410" y="172" width="230" height="40" rx="10"/><text class="t" x="424" y="197">kept as an orphan, data safe</text>
+  </svg>
+  <figcaption>Figure 2.6 · <code>DESTROY</code> keeps dev clean. <code>RETAIN</code> means one wrong command can never wipe real candidate data.</figcaption>
+</figure>
+
+<div class="file">lib/talentmatch-stack.ts</div>
+<pre class="code"><span class="c">// Dev data is disposable; prod data must survive a stack delete.</span>
+removalPolicy: props.stage === <span class="s">'prod'</span> ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
+
+<span class="c">// Tag everything in this stack with stage=dev or stage=prod</span>
+cdk.Tags.of(<span class="k">this</span>).add(<span class="s">'stage'</span>, props.stage);
+
+<span class="c">// Print real names after deploy</span>
+<span class="k">new</span> cdk.CfnOutput(<span class="k">this</span>, <span class="s">'ApiUrl'</span>, { value: api.apiEndpoint });</pre>
+
+<p>Our real outputs after the Sprint 2a deploy:</p>
+<pre class="term"><span class="o">Outputs:
+TalentMatch-dev.ApiFunctionName = TalentMatch-dev-ApiFunctionCE271BD4-KWfgExCKxT3a
+TalentMatch-dev.ApiLogGroup = /talentmatch/dev/api
+TalentMatch-dev.ApiUrl = https://1ezo0amr36.execute-api.ap-south-1.amazonaws.com
+TalentMatch-dev.TableName = TalentMatch-dev-TableCD117FA1-1MYDSRWJRNU0A
+TalentMatch-dev.WebUrl = https://d2kcn6pne6ts5i.cloudfront.net</span>
+<span class="c"># These change every time the stack is destroyed and deployed again</span></pre>
+
+<h3>Technical terms</h3>
+<div class="tw"><table class="terms">
+  <tr><th>Term</th><th>Simple meaning</th><th>Example from our project</th></tr>
+  <tr><td>Removal policy</td><td>What happens to a resource when the stack is deleted</td><td><code>DESTROY</code> in dev, <code>RETAIN</code> for the prod table</td></tr>
+  <tr><td>Orphan</td><td>A resource left behind with no stack managing it</td><td>The prod table after a destroy</td></tr>
+  <tr><td><code>autoDeleteObjects</code></td><td>Empties a bucket so it can be deleted</td><td>Our web bucket</td></tr>
+  <tr><td>Tag</td><td>A label (key=value) on a resource</td><td><code>stage=dev</code></td></tr>
+  <tr><td>Output (<code>CfnOutput</code>)</td><td>A value printed after deploy</td><td><code>ApiUrl</code>, <code>WebUrl</code>, <code>TableName</code></td></tr>
+</table></div>
+</section>
+
+<!-- ===================== 2.9 ===================== -->
+<section id="sam">
+<h2><span class="n">2.9</span>The plan said SAM. We use CDK.</h2>
+<p class="lead">Our plan artifacts were written for AWS SAM. We chose TypeScript CDK instead. The architecture is the same; only the tool changes.</p>
+
+<div class="tw"><table>
+  <tr><th>Plan says (SAM)</th><th>We do (CDK)</th></tr>
+  <tr><td><code>template.yaml</code></td><td><code>lib/talentmatch-stack.ts</code></td></tr>
+  <tr><td><code>sam build &amp;&amp; sam deploy</code></td><td><code>npx cdk deploy TalentMatch-dev</code></td></tr>
+  <tr><td><code>sam delete</code></td><td><code>npx cdk destroy TalentMatch-dev</code></td></tr>
+  <tr><td><code>sam local invoke</code></td><td>Python unit tests (<code>python -m unittest</code>), or <code>sam local invoke -t cdk.out/TalentMatch-dev.template.json</code></td></tr>
+  <tr><td>Policy templates (<code>DynamoDBCrudPolicy</code>)</td><td><code>table.grantReadWriteData(fn)</code></td></tr>
+  <tr><td><code>sam logs</code></td><td><code>aws logs tail /talentmatch/dev/api --follow</code></td></tr>
+</table></div>
+
+<div class="box explore"><span class="label">Explore more</span>
+<ul class="check">
+  <li>Open <code>cdk.out/TalentMatch-dev.template.json</code> and find the IAM policy CDK wrote for the table grant.</li>
+  <li>Open <code>cdk.out/manifest.json</code>: which assets (zips) does it list, and which stack needs them?</li>
+  <li>CloudFormation console → TalentMatch-dev → <strong>Resources</strong> tab: match each logical ID to its physical ID.</li>
+  <li>CloudFormation console → TalentMatch-dev → <strong>Stack actions → Detect drift</strong>. It should say IN_SYNC.</li>
+  <li>CloudFormation console → TalentMatch-dev → <strong>Template</strong> tab: compare it with your <code>cdk synth</code> output.</li>
+  <li>Run <code>npx cdk synth TalentMatch-prod</code> and compare the table's <code>DeletionPolicy</code> with dev's.</li>
+  <li>Run <code>npx cdk doctor</code> to see your CDK environment.</li>
+</ul>
+</div>
+</section>
+
+<!-- ===================== Q&A ===================== -->
+<section id="qa">
+<h2><span class="n">2.10</span>Check yourself</h2>
+<p>Try to answer in your head first, then click to reveal.</p>
+<div class="qa-list">
+  <details class="qa"><summary>Name three advantages of infrastructure as code over clicking in the console.</summary><div class="a">It is repeatable (same code builds dev and prod), reviewable (Git shows every change), and cleanly removable (<code>cdk destroy</code> deletes everything it created, so no forgotten resources keep costing money).</div></details>
+  <details class="qa"><summary>Does CDK create AWS resources itself?</summary><div class="a">No. CDK runs on your Mac and writes a CloudFormation template (<code>cdk synth</code>). CloudFormation in AWS reads the template and creates the resources.</div></details>
+  <details class="qa"><summary>What does CloudFormation do if one resource fails during a deploy?</summary><div class="a">It rolls back: it undoes every change from that deploy, so the stack returns to its last good state instead of being half-built.</div></details>
+  <details class="qa"><summary>What is drift and how do you cause it by accident?</summary><div class="a">Drift is when real resources no longer match the template, usually because someone edited or deleted a CDK-made resource by hand in the console. It can make the next deploy or destroy fail.</div></details>
+  <details class="qa"><summary>What is the difference between <code>bin/</code>, <code>lib/</code> and <code>src/</code>?</summary><div class="a"><code>bin/</code> creates the App and decides which stacks exist. <code>lib/</code> defines what is inside a stack. Both run only on your Mac. <code>src/</code> is application code (Python) that actually runs in AWS Lambda.</div></details>
+  <details class="qa"><summary>What is the difference between an L1 and an L2 construct?</summary><div class="a">L1 (<code>CfnBucket</code>) is a raw CloudFormation resource where you set everything. L2 (<code>s3.Bucket</code>) wraps it with safe defaults and helpers like <code>grantRead</code>. We use L2. L3 patterns such as <code>BucketDeployment</code> combine several resources.</div></details>
+  <details class="qa"><summary>What is a token? Give an example from our stack.</summary><div class="a">A placeholder for a value that only exists after deploy. <code>table.tableName</code> becomes <code>{"Ref": "TableCD117FA1"}</code> in the template, and CloudFormation fills in <code>TalentMatch-dev-TableCD117FA1-…</code> at deploy time.</div></details>
+  <details class="qa"><summary>What is the bootstrap assets bucket, and can you delete it?</summary><div class="a">It belongs to the <code>CDKToolkit</code> stack and holds the zips and templates CDK uploads on every deploy. Don't delete it: future deploys would fail until you re-run <code>cdk bootstrap</code>. Use <code>npx cdk gc</code> to clean old files.</div></details>
+  <details class="qa"><summary>In a diff, what does "replace" mean, and why is it dangerous?</summary><div class="a">The resource will be deleted and created again with a new physical name. For logs that's minor; for a table or bucket it means the data is gone. Stop and think whenever you see replace on stateful resources.</div></details>
+  <details class="qa"><summary>CDK asks "security-sensitive updates… broadening". What should you check before typing y?</summary><div class="a">The IAM Statement Changes table: which principal gets which actions on which resources. For our table grant, the resources should be only our table's ARN and <code>…/index/*</code>, not <code>*</code>.</div></details>
+  <details class="qa"><summary>What happens to the prod table on <code>cdk destroy TalentMatch-prod</code>?</summary><div class="a">Its removal policy is <code>RETAIN</code>, so CloudFormation leaves it in the account as an orphan with all its data. A fresh deploy would create a new, empty table; reconnecting the old one needs <code>cdk import</code>.</div></details>
+  <details class="qa"><summary>Why does <code>cdk synth</code> fail with "Cannot find asset at …/frontend/dist"?</summary><div class="a">The stack uploads <code>frontend/dist</code> with <code>BucketDeployment</code>, and that folder only exists after <code>npm run build</code> inside <code>frontend/</code>. Build the frontend first.</div></details>
+</div>
+</section>
+
+<nav class="pager" aria-label="Previous and next chapter">
+  <a class="prev" href="01-aws-basics-and-account-setup.html"><small>← Previous</small>1 · AWS basics and account setup</a>
+  <a class="next" href="03-lambda-and-the-health-api.html"><small>Next →</small>3 · Lambda and the health API</a>
+</nav>
+</main>
+</body>
+</html>

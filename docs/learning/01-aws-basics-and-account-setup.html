@@ -1,0 +1,602 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AWS Basics and Account Setup</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+  <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah" d="M0,0 L10,5 L0,10 z"/></marker>
+  <marker id="arb" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah blue" d="M0,0 L10,5 L0,10 z"/></marker>
+  <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah red" d="M0,0 L10,5 L0,10 z"/></marker>
+  <marker id="arg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah green" d="M0,0 L10,5 L0,10 z"/></marker>
+</defs></svg>
+
+<nav class="topbar" aria-label="Chapters"><div class="in">
+  <a class="home" href="index.html">TalentMatch book</a>
+  <a href="00-plan-and-design.html">0 Plan</a>
+  <a class="here" href="01-aws-basics-and-account-setup.html">1 AWS</a>
+  <a href="02-infrastructure-as-code-with-cdk.html">2 CDK</a>
+  <a href="03-lambda-and-the-health-api.html">3 Lambda</a>
+  <a href="04-hosting-the-ui-s3-cloudfront.html">4 UI hosting</a>
+  <a href="05-dynamodb-explained.html">5 DynamoDB</a>
+  <a href="06-building-the-jobs-api.html">6 Jobs API</a>
+  <a href="07-testing-debugging-and-habits.html">7 Debugging</a>
+</div></nav>
+
+<main>
+<header class="hero">
+  <div class="num">01</div>
+  <div class="kicker">Chapter 1 · Sprint 0</div>
+  <h1>AWS basics and setting up a safe account</h1>
+  <p class="sub">Before we build anything, we need a cloud account that is safe, cheap and easy to log in to. This chapter explains what the cloud is, who is allowed to do what, and how we stop surprise bills.</p>
+  <div class="learn">
+    <h3>What you will learn</h3>
+    <ul>
+      <li>What "the cloud" really is</li>
+      <li>Regions and why we picked Mumbai</li>
+      <li>Root user, IAM users, roles and SSO</li>
+      <li>How to read an IAM policy line by line</li>
+      <li>Least privilege and shared responsibility</li>
+      <li>Free tier, budgets and cost tags</li>
+      <li>CloudTrail: the account's diary</li>
+      <li>The AWS CLI, profiles and <code>aws login</code></li>
+    </ul>
+  </div>
+  <nav class="toc" aria-label="In this chapter">
+    <a href="#cloud">1.1 The cloud</a><a href="#regions">1.2 Regions</a><a href="#identity">1.3 Who can log in</a>
+    <a href="#policies">1.4 IAM policies</a><a href="#shared">1.5 Shared responsibility</a><a href="#billing">1.6 Billing</a>
+    <a href="#cloudtrail">1.7 CloudTrail</a><a href="#cli">1.8 The CLI</a><a href="#bedrock">1.9 Bedrock check</a><a href="#qa">Check yourself</a>
+  </nav>
+</header>
+
+<!-- ===================== 1.1 ===================== -->
+<section id="cloud">
+<h2><span class="n">1.1</span>What is the cloud?</h2>
+<p class="lead">The cloud is someone else's computers that you rent by the second, controlled through the internet.</p>
+
+<div class="box simple"><span class="label">In simple words</span>
+<p>Imagine you want to throw a birthday party. You could <strong>buy</strong> a big hall, chairs, a kitchen and a sound system, and pay for them even on the 364 days with no party. Or you could <strong>rent</strong> a hall only for the 4 hours of the party.</p>
+<p>The cloud is renting. AWS (Amazon Web Services) owns huge buildings full of computers. You rent a tiny slice, only while you use it. Our health check runs for about 5 milliseconds per request, so we pay for 5 milliseconds, not for a whole computer sitting there all day.</p>
+</div>
+
+<div class="box tech"><span class="label">Technical view</span>
+<p>AWS offers more than 200 <strong>services</strong>. Some give you raw computers (EC2), others give you finished building blocks: run code (Lambda), store files (S3), store records (DynamoDB), serve websites (CloudFront). Our project only uses <strong>serverless</strong> services: there is no server for us to manage, they scale automatically, and they charge per use. When nobody uses TalentMatch, the bill is close to zero.</p>
+</div>
+
+<figure>
+  <svg viewBox="0 0 700 230" role="img" aria-label="Owning servers versus renting serverless">
+    <text class="gt" x="20" y="24">OWN A SERVER</text>
+    <rect class="bx bad" x="20" y="36" width="300" height="70" rx="10"/>
+    <text class="t" x="36" y="62">Paid 24 hours a day</text>
+    <text class="s" x="36" y="82">even at 3 a.m. when nobody uses it</text>
+    <text class="s" x="36" y="97">you patch, update and fix it yourself</text>
+    <g>
+      <rect class="fill-red" x="20" y="130" width="300" height="18" rx="3"/>
+      <text class="lb" x="20" y="166">cost: the bar is full all day</text>
+    </g>
+    <text class="gt" x="380" y="24">SERVERLESS (what we use)</text>
+    <rect class="bx user" x="380" y="36" width="300" height="70" rx="10"/>
+    <text class="t" x="396" y="62">Paid only per request</text>
+    <text class="s" x="396" y="82">idle = almost free</text>
+    <text class="s" x="396" y="97">AWS patches and scales it for you</text>
+    <g>
+      <rect class="fill-muted" x="380" y="130" width="300" height="18" rx="3"/>
+      <rect class="fill-green" x="400" y="130" width="10" height="18"/>
+      <rect class="fill-green" x="470" y="130" width="22" height="18"/>
+      <rect class="fill-green" x="560" y="130" width="8" height="18"/>
+      <rect class="fill-green" x="630" y="130" width="14" height="18"/>
+      <text class="lb" x="380" y="166">cost: only the green moments (requests)</text>
+    </g>
+    <text class="s" x="20" y="205">Each bar is one day, left to right. Coloured = you are paying. Grey = free.</text>
+  </svg>
+  <figcaption>Figure 1.1 · Owning a server means paying all day. Serverless means paying only in the moments someone uses the app.</figcaption>
+</figure>
+
+<h3>Technical terms</h3>
+<div class="tw"><table class="terms">
+  <tr><th>Term</th><th>Simple meaning</th><th>Example from our project</th></tr>
+  <tr><td>Cloud</td><td>Renting computers over the internet</td><td>Our API runs on AWS computers in Mumbai</td></tr>
+  <tr><td>AWS service</td><td>One building block you can rent</td><td>Lambda, S3, DynamoDB, CloudFront</td></tr>
+  <tr><td>Serverless</td><td>No server for you to look after; pay per use</td><td>Our Lambda costs nothing while nobody calls it</td></tr>
+  <tr><td>Pay per use</td><td>The bill follows how much you actually use</td><td>About $1 per million API calls</td></tr>
+</table></div>
+</section>
+
+<!-- ===================== 1.2 ===================== -->
+<section id="regions">
+<h2><span class="n">1.2</span>Regions and availability zones</h2>
+<p class="lead">A region is a city where AWS has data centers. We put everything in Mumbai, called <code>ap-south-1</code>.</p>
+
+<div class="box simple"><span class="label">In simple words</span>
+<p>Think of a pizza chain. It has kitchens in many cities. When you order, you want the kitchen in <strong>your</strong> city, so the pizza is hot and fast. Inside one city the chain has <strong>three separate kitchens</strong> in different neighbourhoods. If one kitchen has a power cut, the other two keep cooking.</p>
+<p>The city is a <strong>region</strong>. Each separate kitchen is an <strong>availability zone</strong> (AZ).</p>
+</div>
+
+<div class="box tech"><span class="label">Technical view</span>
+<p>Each region has a code: <code>ap-south-1</code> is Mumbai, <code>us-east-1</code> is North Virginia. Each region has at least 3 AZs, which are separate buildings with their own power and network. Serverless services like Lambda and DynamoDB spread across AZs automatically, so we get this safety for free.</p>
+<p>We chose Mumbai because of <strong>ADR-002</strong> in our plan: TalentMatch stores resumes of people in India, and the India DPDP Act 2023 prefers that personal data stays in India. Mumbai is also the closest region to our users, so pages load faster.</p>
+</div>
+
+<figure>
+  <svg viewBox="0 0 700 250" role="img" aria-label="One region contains three availability zones">
+    <rect class="grp" x="20" y="20" width="440" height="210" rx="14"/>
+    <text class="gt" x="36" y="44">REGION · ap-south-1 (Mumbai)</text>
+    <rect class="bx aws" x="40" y="64" width="125" height="140" rx="10"/>
+    <text class="t" x="54" y="88">AZ ap-south-1a</text><text class="s" x="54" y="106">building 1</text>
+    <rect class="bx aws" x="178" y="64" width="125" height="140" rx="10"/>
+    <text class="t" x="192" y="88">AZ ap-south-1b</text><text class="s" x="192" y="106">building 2</text>
+    <rect class="bx aws" x="316" y="64" width="125" height="140" rx="10"/>
+    <text class="t" x="330" y="88">AZ ap-south-1c</text><text class="s" x="330" y="106">building 3</text>
+    <rect class="bx code" x="52" y="130" width="100" height="26" rx="6"/><text class="s" x="62" y="147">Lambda copy</text>
+    <rect class="bx code" x="190" y="130" width="100" height="26" rx="6"/><text class="s" x="200" y="147">Lambda copy</text>
+    <rect class="bx code" x="328" y="130" width="100" height="26" rx="6"/><text class="s" x="338" y="147">Lambda copy</text>
+    <rect class="bx data" x="52" y="166" width="100" height="26" rx="6"/><text class="s" x="62" y="183">data copy</text>
+    <rect class="bx data" x="190" y="166" width="100" height="26" rx="6"/><text class="s" x="200" y="183">data copy</text>
+    <rect class="bx data" x="328" y="166" width="100" height="26" rx="6"/><text class="s" x="338" y="183">data copy</text>
+    <rect class="bx" x="490" y="40" width="190" height="56" rx="10"/>
+    <text class="t" x="504" y="63">us-east-1</text><text class="s" x="504" y="81">North Virginia (not used)</text>
+    <rect class="bx" x="490" y="112" width="190" height="56" rx="10"/>
+    <text class="t" x="504" y="135">eu-west-1</text><text class="s" x="504" y="153">Ireland (not used)</text>
+    <text class="s" x="490" y="196">Other regions are completely</text>
+    <text class="s" x="490" y="212">separate. Data does not move</text>
+    <text class="s" x="490" y="228">between them unless you ask.</text>
+  </svg>
+  <figcaption>Figure 1.2 · One region holds at least three availability zones. AWS keeps copies of serverless resources in several of them.</figcaption>
+</figure>
+
+<div class="box warn"><span class="label">Watch out</span>
+<p>The console shows only one region at a time (top right corner). If you open the Lambda page and it is empty, check that the corner says <strong>Asia Pacific (Mumbai)</strong>. A few services are <strong>global</strong> and ignore the region: IAM, CloudFront and Billing. That is why our budget showed up when we listed budgets in <code>us-east-1</code>.</p>
+</div>
+
+<h3>Technical terms</h3>
+<div class="tw"><table class="terms">
+  <tr><th>Term</th><th>Simple meaning</th><th>Example from our project</th></tr>
+  <tr><td>Region</td><td>A city where AWS has data centers</td><td><code>ap-south-1</code> (Mumbai)</td></tr>
+  <tr><td>Availability zone (AZ)</td><td>One separate building inside a region</td><td><code>ap-south-1a</code>, <code>ap-south-1b</code>, <code>ap-south-1c</code></td></tr>
+  <tr><td>Global service</td><td>A service that is the same in every region</td><td>IAM, CloudFront, Budgets</td></tr>
+  <tr><td>Data residency</td><td>Rules about which country data must stay in</td><td>DPDP Act: resumes stay in India</td></tr>
+</table></div>
+</section>
+
+<!-- ===================== 1.3 ===================== -->
+<section id="identity">
+<h2><span class="n">1.3</span>Who can log in: root, IAM users, roles and SSO</h2>
+<p class="lead">An AWS account is a locked house. There are different kinds of keys, and we use the weakest key that still does the job.</p>
+
+<div class="box simple"><span class="label">In simple words</span>
+<p>Picture a house:</p>
+<ul>
+  <li>The <strong>root user</strong> is the owner's master key. It opens every door, can sell the house, and can even close the bank account. You keep it in a safe and almost never use it.</li>
+  <li>An <strong>IAM user</strong> is a key made for one person. Our person is <code>jaimin-admin</code>.</li>
+  <li>A <strong>role</strong> is a visitor badge. Nobody owns it; someone wears it for a short time. A Lambda function wears a role to get permission to write logs.</li>
+  <li><strong>IAM Identity Center (SSO)</strong> is a front desk that hands out short-lived badges to company staff.</li>
+</ul>
+</div>
+
+<div class="box tech"><span class="label">Technical view</span>
+<p>The <strong>root user</strong> is the email address that created the account. It cannot be limited, so we protect it with MFA and stop using it. Daily work happens through an <strong>IAM identity</strong>. Every identity gets permissions from <strong>policies</strong> (section 1.4).</p>
+<p>The safest identities use <strong>temporary credentials</strong> that expire. Our setup uses <code>aws login</code> for the IAM user <code>jaimin-admin</code>: the CLI gets short-lived keys, and <strong>no long-lived access key is stored</strong> on the Mac. We checked this: <code>~/.aws/credentials</code> has no <code>aws_access_key_id</code> line.</p>
+</div>
+
+<figure>
+  <svg viewBox="0 0 700 300" role="img" aria-label="Kinds of identities in an AWS account">
+    <rect class="grp" x="20" y="16" width="660" height="268" rx="14"/>
+    <text class="gt" x="36" y="40">AWS ACCOUNT 143495498376</text>
+    <rect class="bx bad" x="40" y="60" width="190" height="96" rx="10"/>
+    <text class="t" x="54" y="84">Root user</text>
+    <text class="s" x="54" y="102">the sign-up email</text>
+    <text class="s" x="54" y="118">can do everything</text>
+    <text class="s" x="54" y="134">MFA on, keep it locked away</text>
+    <rect class="bx user" x="255" y="60" width="190" height="96" rx="10"/>
+    <text class="t" x="269" y="84">IAM user</text>
+    <text class="s" x="269" y="102">jaimin-admin</text>
+    <text class="s" x="269" y="118">used every day</text>
+    <text class="s" x="269" y="134">temporary keys via aws login</text>
+    <rect class="bx aws" x="470" y="60" width="190" height="96" rx="10"/>
+    <text class="t" x="484" y="84">IAM role</text>
+    <text class="s" x="484" y="102">a badge, nobody owns it</text>
+    <text class="s" x="484" y="118">worn by Lambda or CDK</text>
+    <text class="s" x="484" y="134">keys expire automatically</text>
+    <rect class="bx data" x="40" y="186" width="620" height="76" rx="10"/>
+    <text class="t" x="54" y="210">Policies (permission slips) attach to users and roles</text>
+    <text class="s" x="54" y="230">Example: the Lambda's role has a policy that says "may write logs" and, from Sprint 2,</text>
+    <text class="s" x="54" y="246">"may read and write the TalentMatch table". Nothing else.</text>
+    <path class="w dash" d="M350 156 V186" marker-end="url(#ar)"/>
+    <path class="w dash" d="M565 156 V186" marker-end="url(#ar)"/>
+  </svg>
+  <figcaption>Figure 1.3 · Three kinds of identity. Root is locked away; we work as an IAM user; services such as Lambda wear roles.</figcaption>
+</figure>
+
+<div class="two">
+  <div class="card"><h4>Use for daily work</h4><ul class="check"><li>IAM user with MFA and <code>aws login</code></li><li>IAM Identity Center (SSO) when a company has many people</li><li>Roles for every AWS service</li></ul></div>
+  <div class="card"><h4>Never do</h4><ul><li>Daily work as root</li><li>Create access keys for root</li><li>Paste access keys into code or Git</li><li>Share one login between people</li></ul></div>
+</div>
+
+<h3>Technical terms</h3>
+<div class="tw"><table class="terms">
+  <tr><th>Term</th><th>Simple meaning</th><th>Example from our project</th></tr>
+  <tr><td>Root user</td><td>The master key of the account</td><td>The email that created account 143495498376</td></tr>
+  <tr><td>IAM</td><td>Identity and Access Management: who can do what</td><td>Users, roles and policies</td></tr>
+  <tr><td>IAM user</td><td>A login for one person</td><td><code>jaimin-admin</code></td></tr>
+  <tr><td>IAM role</td><td>A badge that a person or service wears for a while</td><td>The role CDK makes for our API Lambda</td></tr>
+  <tr><td>IAM Identity Center</td><td>AWS's single sign-on front desk</td><td>The plan's choice for company staff</td></tr>
+  <tr><td>MFA</td><td>A second proof: a code from your phone</td><td>Required on root</td></tr>
+  <tr><td>Temporary credentials</td><td>Keys that expire after some hours</td><td>What <code>aws login</code> gives the CLI</td></tr>
+</table></div>
+</section>
+
+<!-- ===================== 1.4 ===================== -->
+<section id="policies">
+<h2><span class="n">1.4</span>Reading an IAM policy line by line</h2>
+<p class="lead">A policy is a permission slip written in JSON. AWS reads it every time someone tries to do something.</p>
+
+<div class="box simple"><span class="label">In simple words</span>
+<p>A school permission slip says: "<strong>Yes</strong>, Riya <strong>may go on the trip</strong> to <strong>the zoo</strong>, <strong>only on Friday</strong>." An IAM policy has the same four parts: yes or no, which action, on which thing, and an optional extra rule.</p>
+</div>
+
+<p>Here is the kind of policy the learning track asks you to write in Sprint 0: allow reading <strong>one</strong> bucket and nothing else.</p>
+<div class="file">read-one-bucket.json</div>
+<pre class="code">{
+  <span class="k">"Version"</span>: <span class="s">"2012-10-17"</span>,
+  <span class="k">"Statement"</span>: [
+    {
+      <span class="k">"Effect"</span>: <span class="s">"Allow"</span>,
+      <span class="k">"Action"</span>: [<span class="s">"s3:GetObject"</span>, <span class="s">"s3:ListBucket"</span>],
+      <span class="k">"Resource"</span>: [
+        <span class="s">"arn:aws:s3:::talentmatch-lab-bucket"</span>,
+        <span class="s">"arn:aws:s3:::talentmatch-lab-bucket/*"</span>
+      ],
+      <span class="k">"Condition"</span>: {
+        <span class="k">"Bool"</span>: { <span class="s">"aws:SecureTransport"</span>: <span class="s">"true"</span> }
+      }
+    }
+  ]
+}</pre>
+
+<div class="tw"><table>
+  <tr><th>Line</th><th>What it means</th><th>In kid words</th></tr>
+  <tr><td><code>Version</code></td><td>The policy language version. Always <code>2012-10-17</code>.</td><td>Which form we are filling in</td></tr>
+  <tr><td><code>Statement</code></td><td>A list of rules. A policy can have many.</td><td>A list of permission slips</td></tr>
+  <tr><td><code>Effect</code></td><td><code>Allow</code> or <code>Deny</code></td><td>Yes or no</td></tr>
+  <tr><td><code>Action</code></td><td><code>service:Operation</code> pairs. <code>s3:GetObject</code> = download a file; <code>s3:ListBucket</code> = see file names.</td><td>What you may do</td></tr>
+  <tr><td><code>Resource</code></td><td>ARNs (AWS addresses) of the things. The bucket itself, and <code>/*</code> = every file inside it.</td><td>Which zoo</td></tr>
+  <tr><td><code>Condition</code></td><td>Extra rules. Here: only over HTTPS.</td><td>Only on Friday</td></tr>
+</table></div>
+
+<h3>How AWS decides: allowed or denied?</h3>
+<figure>
+  <svg viewBox="0 0 700 320" role="img" aria-label="IAM decision flowchart">
+    <rect class="bx user" x="250" y="10" width="200" height="44" rx="10"/>
+    <text class="t" x="264" y="37">A request arrives</text>
+    <path class="w" d="M350 54 V80" marker-end="url(#ar)"/>
+    <rect class="bx warn" x="200" y="84" width="300" height="48" rx="10"/>
+    <text class="t" x="214" y="105">Does any policy say Deny?</text>
+    <text class="s" x="214" y="122">checks every attached policy</text>
+    <path class="w red" d="M500 108 H550" marker-end="url(#arr)"/><text class="lb" x="510" y="100">yes</text>
+    <rect class="bx bad" x="555" y="84" width="135" height="48" rx="10"/>
+    <text class="t" x="568" y="105">DENIED</text><text class="s" x="568" y="122">Deny always wins</text>
+    <path class="w" d="M350 132 V160" marker-end="url(#ar)"/><text class="lb" x="358" y="150">no</text>
+    <rect class="bx warn" x="200" y="164" width="300" height="48" rx="10"/>
+    <text class="t" x="214" y="185">Does any policy say Allow?</text>
+    <text class="s" x="214" y="202">action + resource + condition match</text>
+    <path class="w green" d="M500 188 H550" marker-end="url(#arg)"/><text class="lb" x="510" y="180">yes</text>
+    <rect class="bx user" x="555" y="164" width="135" height="48" rx="10"/>
+    <text class="t" x="568" y="185">ALLOWED</text><text class="s" x="568" y="202">request goes ahead</text>
+    <path class="w" d="M350 212 V240" marker-end="url(#ar)"/><text class="lb" x="358" y="230">no</text>
+    <rect class="bx bad" x="200" y="244" width="300" height="56" rx="10"/>
+    <text class="t" x="214" y="266">DENIED by default</text>
+    <text class="s" x="214" y="284">nothing said yes, so the answer is no</text>
+  </svg>
+  <figcaption>Figure 1.4 · AWS starts from "no". An explicit Deny always wins. Otherwise you need at least one Allow that matches.</figcaption>
+</figure>
+
+<div class="box tech"><span class="label">Least privilege</span>
+<p><strong>Least privilege</strong> means: give each identity only the actions and resources it really needs. In Sprint 2 our Lambda got <code>table.grantReadWriteData(apiFn)</code>, which allows DynamoDB read and write actions on <strong>our one table and its indexes</strong>. It cannot touch any other table in the account. When we removed that grant on purpose, creating a job failed with <code>AccessDeniedException</code>. That is the "denied by default" box in Figure 1.4 in action.</p>
+</div>
+
+<h3>Technical terms</h3>
+<div class="tw"><table class="terms">
+  <tr><th>Term</th><th>Simple meaning</th><th>Example from our project</th></tr>
+  <tr><td>Policy</td><td>A JSON permission slip</td><td>The policy CDK writes for our Lambda</td></tr>
+  <tr><td>Action</td><td>One thing you can do in a service</td><td><code>dynamodb:PutItem</code> (save one item)</td></tr>
+  <tr><td>Resource</td><td>The exact thing the action is on</td><td>Our table's ARN</td></tr>
+  <tr><td>ARN</td><td>Amazon Resource Name: the full address of a thing</td><td><code>arn:aws:cloudformation:ap-south-1:143495498376:stack/TalentMatch-dev/…</code></td></tr>
+  <tr><td>Implicit deny</td><td>No rule said yes, so it is no</td><td>The Lambda without the table grant</td></tr>
+  <tr><td>Explicit deny</td><td>A rule says no; beats every yes</td><td>A bucket policy that blocks plain HTTP</td></tr>
+  <tr><td>Least privilege</td><td>Only the permissions you need</td><td>One table, not <code>dynamodb:*</code> on <code>*</code></td></tr>
+</table></div>
+
+<div class="box explore"><span class="label">Explore more</span>
+<ul class="check">
+  <li>Console → IAM → Policy simulator: pick <code>jaimin-admin</code> and test whether <code>s3:DeleteBucket</code> is allowed.</li>
+  <li>Console → IAM → Roles: find the role whose name starts with <code>TalentMatch-dev-ApiFunctionServiceRole</code> (when the stack is deployed) and read its policies.</li>
+  <li>Console → IAM → Access Analyzer: see whether anything in the account is shared publicly.</li>
+</ul>
+</div>
+</section>
+
+<!-- ===================== 1.5 ===================== -->
+<section id="shared">
+<h2><span class="n">1.5</span>The shared responsibility model</h2>
+<p class="lead">AWS keeps the buildings and machines safe. You keep your data, your code and your permissions safe.</p>
+
+<div class="box simple"><span class="label">In simple words</span>
+<p>You rent a flat. The landlord fixes the roof, the pipes and the front door of the building. <strong>You</strong> lock your own flat door, and you decide who gets a copy of your key. If you leave your door open, the landlord is not to blame.</p>
+</div>
+
+<figure>
+  <svg viewBox="0 0 700 250" role="img" aria-label="Shared responsibility split">
+    <rect class="bx user" x="20" y="20" width="660" height="110" rx="12"/>
+    <text class="gt" x="36" y="44">YOU: security IN the cloud</text>
+    <text class="s" x="36" y="68">Your data (resumes, jobs) · who can access it (IAM policies, bucket privacy)</text>
+    <text class="s" x="36" y="86">Your code (bugs, input validation) · encryption settings · not leaking keys</text>
+    <text class="s" x="36" y="104">In our project: BLOCK_ALL on buckets, enforceSSL, least-privilege grants, no stored keys</text>
+    <rect class="bx aws" x="20" y="140" width="660" height="90" rx="12"/>
+    <text class="gt" x="36" y="164">AWS: security OF the cloud</text>
+    <text class="s" x="36" y="188">Buildings, guards, power · hardware · network · the servers that run Lambda</text>
+    <text class="s" x="36" y="206">Patching the operating system under serverless services</text>
+  </svg>
+  <figcaption>Figure 1.5 · With serverless, AWS takes a larger share (it patches the machines that run our Lambda). Our share is data, access and code.</figcaption>
+</figure>
+
+<h3>Technical terms</h3>
+<div class="tw"><table class="terms">
+  <tr><th>Term</th><th>Simple meaning</th><th>Example from our project</th></tr>
+  <tr><td>Security of the cloud</td><td>AWS's job: hardware, buildings, network</td><td>The Mumbai data centers</td></tr>
+  <tr><td>Security in the cloud</td><td>Your job: data, access, code</td><td>Keeping the web bucket private</td></tr>
+  <tr><td>Encryption at rest</td><td>Data is scrambled when stored on disk</td><td><code>S3_MANAGED</code> encryption on the web bucket</td></tr>
+  <tr><td>Encryption in transit</td><td>Data is scrambled while it travels</td><td>HTTPS everywhere, <code>enforceSSL: true</code></td></tr>
+</table></div>
+</section>
+
+<!-- ===================== 1.6 ===================== -->
+<section id="billing">
+<h2><span class="n">1.6</span>Billing: free tier, credits, budgets and cost tags</h2>
+<p class="lead">AWS bills by usage. We set an alarm at $15 a month so a mistake can never become a big surprise.</p>
+
+<div class="box simple"><span class="label">In simple words</span>
+<p>It is like a prepaid phone plan with a <strong>free allowance</strong> each month: some free calls, some free messages. Go over and you pay a little per extra call. A <strong>budget</strong> is a friend who texts you: "you've used 80% of your money this month!" A <strong>cost tag</strong> is a sticker on each item so the bill can say "this much was for TalentMatch".</p>
+</div>
+
+<div class="box tech"><span class="label">Technical view</span>
+<ul>
+  <li><strong>Always-free</strong> allowances never expire: Lambda 1 million requests a month, CloudFront 1 TB of transfer, CloudWatch Logs 5 GB.</li>
+  <li><strong>Credits</strong>: new accounts get free credits for a limited time. When the time or credits run out, normal prices apply.</li>
+  <li><strong>AWS Budgets</strong>: we created <code>talentmatch-monthly</code> with a limit of <strong>$15</strong>. It emails you when spending crosses a threshold.</li>
+  <li><strong>Cost allocation tags</strong>: CDK adds tags such as <code>project=talentmatch</code> and <code>stage=dev</code> to resources. Billing only shows them in Cost Explorer after you <strong>activate</strong> them (Billing → Cost allocation tags), and data takes up to 24 hours to appear.</li>
+</ul>
+</div>
+
+<h3>What our Sprint 1 setup costs at learning size</h3>
+<div class="tw"><table>
+  <tr><th>Service</th><th>Free allowance</th><th>Our usage</th><th class="num">Cost</th></tr>
+  <tr><td>Lambda</td><td>1M requests + 400k GB-seconds a month, always free</td><td>A few hundred requests</td><td class="num">$0</td></tr>
+  <tr><td>CloudFront</td><td>1 TB + 10M requests a month, always free</td><td>About 220 KB per page load</td><td class="num">$0</td></tr>
+  <tr><td>CloudWatch Logs</td><td>5 GB a month</td><td>Kilobytes, kept 7 days</td><td class="num">$0</td></tr>
+  <tr><td>API Gateway (HTTP API)</td><td>Free tier for new accounts, then about $1 per million</td><td>Hundreds</td><td class="num">≈ $0</td></tr>
+  <tr><td>S3 (web + CDK assets)</td><td>Small free tier, then about $0.025 per GB-month</td><td>Under 1 MB</td><td class="num">&lt; $0.01</td></tr>
+  <tr class="total"><td>Total</td><td></td><td></td><td class="num">≈ $0</td></tr>
+</table></div>
+
+<div class="box danger"><span class="label">Costs money</span>
+<p>These services charge even when idle, which is why the plan bans them for the learning phase: NAT Gateway (about $32/month), OpenSearch Serverless (about $175/month), Aurora or RDS ($45+/month), Amazon Kendra (hundreds per month). If you ever see one of these in a <code>cdk diff</code>, stop and ask why.</p>
+</div>
+
+<figure>
+  <svg viewBox="0 0 700 170" role="img" aria-label="How a budget alert works">
+    <rect class="bx code" x="10" y="50" width="140" height="60" rx="10"/><text class="t" x="24" y="76">Resources</text><text class="s" x="24" y="94">tagged project=…</text>
+    <path class="w" d="M150 80 H190" marker-end="url(#ar)"/>
+    <rect class="bx aws" x="195" y="50" width="140" height="60" rx="10"/><text class="t" x="209" y="76">Billing data</text><text class="s" x="209" y="94">updated daily</text>
+    <path class="w" d="M335 80 H375" marker-end="url(#ar)"/>
+    <rect class="bx warn" x="380" y="50" width="150" height="60" rx="10"/><text class="t" x="394" y="76">Budget check</text><text class="s" x="394" y="94">over $15 limit?</text>
+    <path class="w red" d="M530 80 H570" marker-end="url(#arr)"/><text class="lb" x="538" y="72">yes</text>
+    <rect class="bx bad" x="575" y="50" width="115" height="60" rx="10"/><text class="t" x="589" y="76">Email you</text><text class="s" x="589" y="94">stop and check</text>
+    <text class="s" x="195" y="140">A budget only warns. It does not switch anything off. You still have to act.</text>
+  </svg>
+  <figcaption>Figure 1.6 · A budget watches the bill and emails you. It never deletes or stops resources by itself.</figcaption>
+</figure>
+
+<ol class="steps">
+  <li><strong>Check your credits.</strong> Console → Billing → Free Tier (or Credits). Look once a week.</li>
+  <li><strong>Activate the tags.</strong> Billing → Cost allocation tags → select <code>project</code> and <code>stage</code> → Activate.</li>
+  <li><strong>Read Cost Explorer.</strong> Billing → Cost Explorer → group by Service, then filter by tag <code>project = talentmatch</code>.</li>
+</ol>
+
+<div class="box warn"><span class="label">Watch out</span>
+<p>Open <code>bin/talentmatch.ts</code> and look for the line <code>cdk.Tags.of(app).add('project', 'talentmatch');</code>. It is <strong>not in the file right now</strong>. Only the <code>stage</code> tag (added in the stack) is being applied. Add the project tag line back at the end of the file so Cost Explorer can filter by project.</p>
+</div>
+
+<h3>Technical terms</h3>
+<div class="tw"><table class="terms">
+  <tr><th>Term</th><th>Simple meaning</th><th>Example from our project</th></tr>
+  <tr><td>Free tier</td><td>An amount you can use for free</td><td>1M Lambda requests a month</td></tr>
+  <tr><td>Credits</td><td>Free money for a new account, for a limited time</td><td>Our trial credits</td></tr>
+  <tr><td>Budget</td><td>A spending alarm</td><td><code>talentmatch-monthly</code>, $15</td></tr>
+  <tr><td>Cost allocation tag</td><td>A sticker that groups costs in the bill</td><td><code>project=talentmatch</code>, <code>stage=dev</code></td></tr>
+  <tr><td>Cost Explorer</td><td>Charts of what you spent</td><td>Group by service, filter by tag</td></tr>
+  <tr><td>Idle cost</td><td>Money charged even when nobody uses it</td><td>NAT Gateway, which we never create</td></tr>
+</table></div>
+</section>
+
+<!-- ===================== 1.7 ===================== -->
+<section id="cloudtrail">
+<h2><span class="n">1.7</span>CloudTrail: the account's diary</h2>
+<p class="lead">CloudTrail writes down every action anyone takes in the account: who, what, when and from where.</p>
+
+<div class="box simple"><span class="label">In simple words</span>
+<p>A school has a visitor book at the gate. Everyone writes their name, the time, and who they came to see. If something goes missing, the principal reads the book. CloudTrail is the visitor book of your AWS account, and it fills itself in automatically.</p>
+</div>
+
+<div class="box tech"><span class="label">Technical view</span>
+<p>CloudTrail <strong>event history</strong> keeps the last 90 days of management events for free, in each region. When we checked in Sprint 0, the newest event was <code>AssumeRole</code>: CDK assuming its deploy role. Every <code>cdk deploy</code> shows up as many events, such as <code>CreateStack</code> and <code>CreateFunction</code>.</p>
+</div>
+
+<pre class="term"><span class="c"># The newest event in your account (read only, free)</span>
+<span class="p">$ </span>aws cloudtrail lookup-events --max-results 1 --query 'Events[0].EventName' --output text
+<span class="o">AssumeRole</span>
+
+<span class="c"># Who created stacks recently?</span>
+<span class="p">$ </span>aws cloudtrail lookup-events --lookup-attributes AttributeKey=EventName,AttributeValue=CreateStack \
+    --query 'Events[].[EventTime,Username]' --output table</pre>
+
+<h3>Technical terms</h3>
+<div class="tw"><table class="terms">
+  <tr><th>Term</th><th>Simple meaning</th><th>Example from our project</th></tr>
+  <tr><td>CloudTrail</td><td>The diary of every action in the account</td><td>Records each <code>cdk deploy</code></td></tr>
+  <tr><td>Event</td><td>One line in the diary</td><td><code>AssumeRole</code>, <code>CreateStack</code></td></tr>
+  <tr><td>Event history</td><td>The free last-90-days view</td><td>Console → CloudTrail → Event history</td></tr>
+  <tr><td>Audit trail</td><td>Proof of who did what</td><td>The plan's Sprint 3 and Sprint 12 build on this</td></tr>
+</table></div>
+</section>
+
+<!-- ===================== 1.8 ===================== -->
+<section id="cli">
+<h2><span class="n">1.8</span>The AWS CLI, profiles and <code>aws login</code></h2>
+<p class="lead">The CLI lets you control AWS by typing commands. A profile tells it which account and region to use.</p>
+
+<div class="box simple"><span class="label">In simple words</span>
+<p>The console is like ordering food by walking around a restaurant and pointing at dishes. The CLI is like ordering by phone: quicker, and easy to repeat. A <strong>profile</strong> is a saved contact in your phone, "talentmatch", that remembers which restaurant (account) and which branch (region) to call.</p>
+</div>
+
+<figure>
+  <svg viewBox="0 0 700 230" role="img" aria-label="How the CLI finds credentials">
+    <rect class="bx user" x="10" y="20" width="150" height="56" rx="10"/><text class="t" x="24" y="44">You type</text><text class="m" x="24" y="62">aws s3 ls</text>
+    <path class="w" d="M160 48 H200" marker-end="url(#ar)"/>
+    <rect class="bx warn" x="205" y="20" width="200" height="56" rx="10"/><text class="t" x="219" y="44">Which profile?</text><text class="m" x="219" y="62">AWS_PROFILE=talentmatch</text>
+    <path class="w" d="M405 48 H445" marker-end="url(#ar)"/>
+    <rect class="bx data" x="450" y="20" width="240" height="56" rx="10"/><text class="t" x="464" y="44">~/.aws/config</text><text class="m" x="464" y="62">region = ap-south-1</text>
+    <path class="w" d="M570 76 V110" marker-end="url(#ar)"/>
+    <rect class="bx warn" x="420" y="114" width="270" height="56" rx="10"/><text class="t" x="434" y="138">Login session still valid?</text><text class="s" x="434" y="156">temporary keys from aws login</text>
+    <path class="w green" d="M420 142 H330" marker-end="url(#arg)"/><text class="lb" x="350" y="134">yes</text>
+    <rect class="bx user" x="160" y="114" width="165" height="56" rx="10"/><text class="t" x="174" y="138">Call AWS</text><text class="s" x="174" y="156">signed request</text>
+    <path class="w red" d="M555 170 V198" marker-end="url(#arr)"/><text class="lb" x="562" y="190">no</text>
+    <text class="s" x="300" y="218">Error: "Your session has expired. Please reauthenticate using 'aws login'."</text>
+  </svg>
+  <figcaption>Figure 1.7 · The CLI picks a profile, reads its region, then uses the temporary keys from <code>aws login</code>. Expired keys produce the error at the bottom.</figcaption>
+</figure>
+
+<h3>Try it: your daily start-up routine</h3>
+<ol class="steps">
+  <li><strong>Check which profile this terminal uses.</strong>
+<pre class="term"><span class="p">$ </span>echo $AWS_PROFILE
+<span class="o">talentmatch</span>
+<span class="c"># Empty? Run: export AWS_PROFILE=talentmatch  (add it to ~/.zshrc to make it permanent)</span></pre></li>
+  <li><strong>Ask AWS "who am I?"</strong> This is the first command of every session.
+<pre class="term"><span class="p">$ </span>aws sts get-caller-identity
+<span class="o">{
+    "UserId": "AIDASC2H7RKEETB4YZPSC",
+    "Account": "143495498376",
+    "Arn": "arn:aws:iam::143495498376:user/jaimin-admin"
+}</span></pre></li>
+  <li><strong>If it errors, log in again.</strong> A browser window opens; approve it.
+<pre class="term"><span class="p">$ </span>aws login
+<span class="p">$ </span>aws sts get-caller-identity     <span class="c"># now it works</span></pre></li>
+  <li><strong>Check the region.</strong>
+<pre class="term"><span class="p">$ </span>aws configure get region
+<span class="o">ap-south-1</span></pre></li>
+  <li><strong>See what is deployed.</strong>
+<pre class="term"><span class="p">$ </span>aws cloudformation list-stacks --stack-status-filter CREATE_COMPLETE UPDATE_COMPLETE \
+    --query 'StackSummaries[].StackName'
+<span class="o">[ "CDKToolkit" ]</span>
+<span class="c"># "parked" state: only the CDK bootstrap stack, nothing that costs money</span></pre></li>
+</ol>
+
+<div class="box story"><span class="label">Real story from our build</span>
+<p><strong>"Your session has expired."</strong> On day one, the very first <code>aws sts get-caller-identity</code> failed with this message. Nothing was broken: the temporary keys from <code>aws login</code> had simply run out. <code>aws login</code> fixed it.</p>
+<p><strong>"Unable to resolve AWS account to use."</strong> The next morning, <code>npx cdk deploy TalentMatch-dev</code> failed with this. Our <code>bin/talentmatch.ts</code> says <code>account: process.env.CDK_DEFAULT_ACCOUNT</code>. CDK fills that in by asking AWS "who am I?". With expired keys there was no answer, so the account was unknown. Same fix: <code>aws login</code>. The lesson: start every session with <code>aws sts get-caller-identity</code>.</p>
+</div>
+
+<h3>Technical terms</h3>
+<div class="tw"><table class="terms">
+  <tr><th>Term</th><th>Simple meaning</th><th>Example from our project</th></tr>
+  <tr><td>AWS CLI</td><td>A program to control AWS by typing</td><td><code>aws s3 ls</code></td></tr>
+  <tr><td>Profile</td><td>A saved set of account + region + login</td><td><code>talentmatch</code></td></tr>
+  <tr><td><code>AWS_PROFILE</code></td><td>Environment variable that picks the profile</td><td><code>export AWS_PROFILE=talentmatch</code></td></tr>
+  <tr><td><code>aws login</code></td><td>Logs the CLI in through your browser; gives temporary keys</td><td>Run when the session expires</td></tr>
+  <tr><td>STS</td><td>Security Token Service: hands out and checks temporary keys</td><td><code>aws sts get-caller-identity</code></td></tr>
+  <tr><td><code>~/.aws/config</code></td><td>The file where profiles live</td><td><code>[profile talentmatch]</code>, <code>region = ap-south-1</code></td></tr>
+</table></div>
+</section>
+
+<!-- ===================== 1.9 ===================== -->
+<section id="bedrock">
+<h2><span class="n">1.9</span>Checking Bedrock access for later sprints</h2>
+<p class="lead">In Sprint 7 the AI model Claude Haiku 4.5 will read resumes. Sprint 0 checks we can reach it from Mumbai.</p>
+
+<div class="box simple"><span class="label">In simple words</span>
+<p>Before a school trip, the teacher phones the museum to check it is open. We did the same for the AI service: we asked AWS "which ways can Mumbai talk to Claude Haiku 4.5?"</p>
+</div>
+
+<pre class="term"><span class="p">$ </span>aws bedrock list-inference-profiles --region ap-south-1 \
+    --query 'inferenceProfileSummaries[?contains(inferenceProfileId,`haiku-4-5`)].inferenceProfileId' \
+    --output text
+<span class="o">global.anthropic.claude-haiku-4-5-20251001-v1:0    in.anthropic.claude-haiku-4-5-20251001-v1:0</span></pre>
+
+<div class="box tech"><span class="label">Technical view</span>
+<p>An <strong>inference profile</strong> is a route to a model. <code>global.</code> may process the request in any AWS region worldwide. <code>in.</code> keeps processing <strong>inside India</strong>. The plan's ADR-002 assumed only the global route existed, so it needed company approval for cross-border AI processing. The <code>in.</code> profile could remove that need in Sprint 7.</p>
+</div>
+
+<figure>
+  <svg viewBox="0 0 700 180" role="img" aria-label="Global versus India inference profile">
+    <rect class="bx code" x="10" y="62" width="150" height="56" rx="10"/><text class="t" x="24" y="86">Our Lambda</text><text class="s" x="24" y="104">in ap-south-1</text>
+    <path class="w" d="M160 80 H205 V48 H250" marker-end="url(#ar)"/><text class="lb" x="166" y="40">global.</text>
+    <rect class="bx warn" x="255" y="20" width="200" height="56" rx="10"/><text class="t" x="269" y="44">Any AWS region</text><text class="s" x="269" y="62">fast, needs approval</text>
+    <path class="w green" d="M160 100 H205 V132 H250" marker-end="url(#arg)"/><text class="lb" x="166" y="150">in.</text>
+    <rect class="bx user" x="255" y="104" width="200" height="56" rx="10"/><text class="t" x="269" y="128">Regions in India only</text><text class="s" x="269" y="146">data stays in India</text>
+    <rect class="bx aws" x="510" y="62" width="180" height="56" rx="10"/><text class="t" x="524" y="86">Claude Haiku 4.5</text><text class="s" x="524" y="104">on Amazon Bedrock</text>
+    <path class="w dash" d="M455 48 H500 V80 H508" marker-end="url(#ar)"/>
+    <path class="w dash" d="M455 132 H500 V100 H508" marker-end="url(#ar)"/>
+  </svg>
+  <figcaption>Figure 1.8 · Two routes to the same model. The <code>in.</code> route keeps AI processing inside India.</figcaption>
+</figure>
+
+<h3>Technical terms</h3>
+<div class="tw"><table class="terms">
+  <tr><th>Term</th><th>Simple meaning</th><th>Example from our project</th></tr>
+  <tr><td>Amazon Bedrock</td><td>AWS's service for using AI models</td><td>Sprint 7 skill extraction</td></tr>
+  <tr><td>Model</td><td>The AI "brain" that reads and writes text</td><td>Claude Haiku 4.5</td></tr>
+  <tr><td>Inference</td><td>Asking a model a question and getting an answer</td><td>"Extract skills from this resume"</td></tr>
+  <tr><td>Inference profile</td><td>Which regions are allowed to answer</td><td><code>in.anthropic.claude-haiku-4-5…</code></td></tr>
+</table></div>
+
+<div class="box explore"><span class="label">Explore more</span>
+<ul class="check">
+  <li>Console → Billing → Bills: open this month and see which services appear, even at $0.00.</li>
+  <li>Console → IAM → Users → <code>jaimin-admin</code> → Security credentials: confirm MFA is on and there are no access keys.</li>
+  <li>Console → IAM → Dashboard: the security recommendations panel should be all green for root.</li>
+  <li>Run <code>aws configure list</code> and see where each setting (profile, region, credentials) comes from.</li>
+  <li>Console → Service Quotas → Lambda: find "Concurrent executions" for ap-south-1. Sprint 15 uses this number.</li>
+</ul>
+</div>
+</section>
+
+<!-- ===================== Q&A ===================== -->
+<section id="qa">
+<h2><span class="n">1.10</span>Check yourself</h2>
+<p>Try to answer in your head first, then click to reveal.</p>
+<div class="qa-list">
+  <details class="qa"><summary>Why does serverless cost almost nothing when nobody uses TalentMatch?</summary><div class="a">Serverless services charge per request or per millisecond of work. With no requests, there is nothing to charge for. A rented server would be charged every hour whether anyone used it or not.</div></details>
+  <details class="qa"><summary>What is the difference between a region and an availability zone?</summary><div class="a">A region is a city-level location (<code>ap-south-1</code> = Mumbai). An availability zone is one separate building inside that region with its own power and network. A region has at least three, so one building failing does not take your app down.</div></details>
+  <details class="qa"><summary>Why did we pick Mumbai?</summary><div class="a">ADR-002: resumes belong to people in India, and the DPDP Act 2023 prefers personal data to stay in India. Mumbai is also closest to our users, so it is faster.</div></details>
+  <details class="qa"><summary>Why should you stop using the root user?</summary><div class="a">Root can do everything, including closing the account, and its permissions cannot be limited. If its password leaks, the attacker owns everything. We lock it with MFA and use the IAM user <code>jaimin-admin</code> for daily work.</div></details>
+  <details class="qa"><summary>What is the difference between an IAM user and an IAM role?</summary><div class="a">A user belongs to one person and is used to log in. A role is a badge nobody owns; a person or an AWS service "wears" it for a short time and gets temporary keys. Our Lambda uses a role, never a user.</div></details>
+  <details class="qa"><summary>A policy has an Allow for <code>s3:GetObject</code> and another policy has a Deny for the same thing. What happens?</summary><div class="a">Denied. An explicit Deny always wins over any Allow.</div></details>
+  <details class="qa"><summary>No policy mentions <code>dynamodb:Scan</code> at all. Can the identity scan a table?</summary><div class="a">No. AWS starts from "denied by default" (implicit deny). Without a matching Allow, the answer is no.</div></details>
+  <details class="qa"><summary>In the shared responsibility model, who is responsible for keeping our web bucket private?</summary><div class="a">We are. AWS secures the hardware and buildings ("of the cloud"), but our data and who can access it is our job ("in the cloud"). That is why our bucket uses <code>BlockPublicAccess.BLOCK_ALL</code>.</div></details>
+  <details class="qa"><summary>Your $15 budget alert fires. Does AWS switch your resources off?</summary><div class="a">No. A budget only sends an email. You must look at Cost Explorer, find what is costing money, and destroy or fix it yourself.</div></details>
+  <details class="qa"><summary>You tagged everything <code>project=talentmatch</code>, but Cost Explorer can't filter by it. Why?</summary><div class="a">Cost allocation tags must be activated in Billing → Cost allocation tags, and data takes up to 24 hours to appear. Also check the tag is really being applied: right now <code>bin/talentmatch.ts</code> is missing the <code>cdk.Tags.of(app).add('project', 'talentmatch')</code> line.</div></details>
+  <details class="qa"><summary><code>cdk deploy</code> says "Unable to resolve AWS account to use". What is the first thing you run?</summary><div class="a"><code>aws sts get-caller-identity</code>. If it errors, run <code>aws login</code> (and check <code>echo $AWS_PROFILE</code> prints <code>talentmatch</code>). CDK needs a working login to work out the account number.</div></details>
+  <details class="qa"><summary>What is the difference between the <code>global.</code> and <code>in.</code> Bedrock inference profiles?</summary><div class="a"><code>global.</code> may run the AI request in any AWS region worldwide. <code>in.</code> keeps processing inside India, which fits the DPDP preference and may remove the need for cross-border approval in Sprint 7.</div></details>
+</div>
+</section>
+
+<nav class="pager" aria-label="Previous and next chapter">
+  <a class="prev" href="00-plan-and-design.html"><small>← Previous</small>0 · The plan and design</a>
+  <a class="next" href="02-infrastructure-as-code-with-cdk.html"><small>Next →</small>2 · Infrastructure as code with CDK</a>
+</nav>
+</main>
+</body>
+</html>

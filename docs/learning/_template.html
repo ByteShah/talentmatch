@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chapter Title</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<!--
+  TEMPLATE RULES (delete this comment in real chapters)
+  - Copy this file to NN-slug.html. Keep the topbar identical in every chapter; only move class="here".
+  - Every SVG uses the shared classes from style.css (bx, t, s, w, lb…) so diagrams follow light/dark mode.
+  - Arrowheads: marker-end="url(#ar)" grey, url(#arb) blue, url(#arr) red, url(#arg) green.
+  - Every SVG text must fit inside its box: ~7.5px per character at .t (13px bold), ~6px at .s (11px).
+  - Q&A uses <details class="qa"> so answers stay hidden until clicked.
+-->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+  <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah" d="M0,0 L10,5 L0,10 z"/></marker>
+  <marker id="arb" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah blue" d="M0,0 L10,5 L0,10 z"/></marker>
+  <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah red" d="M0,0 L10,5 L0,10 z"/></marker>
+  <marker id="arg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah green" d="M0,0 L10,5 L0,10 z"/></marker>
+</defs></svg>
+
+<nav class="topbar" aria-label="Chapters"><div class="in">
+  <a class="home" href="index.html">TalentMatch book</a>
+  <a href="00-plan-and-design.html">0 Plan</a>
+  <a href="01-aws-basics-and-account-setup.html">1 AWS</a>
+  <a href="02-infrastructure-as-code-with-cdk.html">2 CDK</a>
+  <a class="here" href="03-lambda-and-the-health-api.html">3 Lambda</a>
+  <a href="04-hosting-the-ui-s3-cloudfront.html">4 UI hosting</a>
+  <a href="05-dynamodb-explained.html">5 DynamoDB</a>
+  <a href="06-building-the-jobs-api.html">6 Jobs API</a>
+  <a href="07-testing-debugging-and-habits.html">7 Debugging</a>
+</div></nav>
+
+<main>
+<header class="hero">
+  <div class="num">03</div>
+  <div class="kicker">Chapter 3 · Sprint 1</div>
+  <h1>Chapter title</h1>
+  <p class="sub">One or two sentences: what this chapter is about, in plain words.</p>
+  <div class="learn">
+    <h3>What you will learn</h3>
+    <ul><li>Point one</li><li>Point two</li><li>Point three</li><li>Point four</li></ul>
+  </div>
+  <nav class="toc" aria-label="In this chapter"><a href="#s1">3.1 Section</a><a href="#qa">Check yourself</a></nav>
+</header>
+
+<section id="s1">
+<h2><span class="n">3.1</span>Section heading</h2>
+<p class="lead">First sentence = the point of this section.</p>
+
+<div class="box simple"><span class="label">In simple words</span><p>A kid-friendly analogy (a librarian, a post office, a lunch box…), with a tiny example.</p></div>
+<div class="box tech"><span class="label">Technical view</span><p>The precise version with the real terms.</p></div>
+<div class="box warn"><span class="label">Watch out</span><p>A common mistake.</p></div>
+<div class="box danger"><span class="label">Costs money</span><p>Something that charges.</p></div>
+<div class="box story"><span class="label">Real story from our build</span><p>A bug we actually hit and what it taught us.</p></div>
+
+<h3>Technical terms</h3>
+<div class="tw"><table class="terms">
+  <tr><th>Term</th><th>Simple meaning</th><th>Example from our project</th></tr>
+  <tr><td>Lambda</td><td>Code that AWS runs only when needed</td><td><code>app.handler</code> runs on each API request</td></tr>
+</table></div>
+
+<h3>Try it</h3>
+<ol class="steps">
+  <li><strong>Do this.</strong> Why.
+<pre class="term"><span class="p">$ </span>npx cdk ls
+<span class="o">TalentMatch-dev
+TalentMatch-prod</span>
+<span class="c"># comment explaining the line</span></pre></li>
+</ol>
+
+<div class="file">src/api/app.py</div>
+<pre class="code"><span class="k">def</span> handler(event, context):
+    <span class="c"># comment</span>
+<span class="hl">    route = event.get(<span class="s">"routeKey"</span>, <span class="s">""</span>)</span></pre>
+
+<figure>
+  <svg viewBox="0 0 640 120" role="img" aria-label="Browser calls API Gateway, which calls Lambda">
+    <rect class="bx user" x="10" y="35" width="150" height="50" rx="8"/><text class="t" x="24" y="57">Browser</text><text class="s" x="24" y="73">you</text>
+    <path class="w blue" d="M160 60 H240" marker-end="url(#arb)"/><text class="lb" x="172" y="52">HTTPS</text>
+    <rect class="bx aws" x="245" y="35" width="150" height="50" rx="8"/><text class="t" x="259" y="57">API Gateway</text><text class="s" x="259" y="73">front door</text>
+    <path class="w" d="M395 60 H475" marker-end="url(#ar)"/>
+    <rect class="bx code" x="480" y="35" width="150" height="50" rx="8"/><text class="t" x="494" y="57">Lambda</text><text class="s" x="494" y="73">your code</text>
+  </svg>
+  <figcaption>Figure 3.1 · What the picture shows, in one sentence.</figcaption>
+</figure>
+
+<div class="box explore"><span class="label">Explore more</span>
+  <ul class="check"><li>Something extra to check in the console or CLI, with the exact command.</li></ul>
+</div>
+</section>
+
+<section id="qa">
+<h2><span class="n">3.9</span>Check yourself</h2>
+<p>Try to answer in your head first, then click to reveal.</p>
+<div class="qa-list">
+  <details class="qa"><summary>Question?</summary><div class="a">Answer, with the reason why.</div></details>
+</div>
+</section>
+
+<nav class="pager" aria-label="Previous and next chapter">
+  <a class="prev" href="02-infrastructure-as-code-with-cdk.html"><small>← Previous</small>2 · Infrastructure as code with CDK</a>
+  <a class="next" href="04-hosting-the-ui-s3-cloudfront.html"><small>Next →</small>4 · Hosting the UI</a>
+</nav>
+</main>
+</body>
+</html>

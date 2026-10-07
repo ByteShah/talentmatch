@@ -1,0 +1,704 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Testing, Debugging and Habits</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+  <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah" d="M0,0 L10,5 L0,10 z"/></marker>
+  <marker id="arb" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah blue" d="M0,0 L10,5 L0,10 z"/></marker>
+  <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah red" d="M0,0 L10,5 L0,10 z"/></marker>
+  <marker id="arg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah green" d="M0,0 L10,5 L0,10 z"/></marker>
+</defs></svg>
+
+<nav class="topbar" aria-label="Chapters"><div class="in">
+  <a class="home" href="index.html">TalentMatch book</a>
+  <a href="00-plan-and-design.html">0 Plan</a>
+  <a href="01-aws-basics-and-account-setup.html">1 AWS</a>
+  <a href="02-infrastructure-as-code-with-cdk.html">2 CDK</a>
+  <a href="03-lambda-and-the-health-api.html">3 Lambda</a>
+  <a href="04-hosting-the-ui-s3-cloudfront.html">4 UI hosting</a>
+  <a href="05-dynamodb-explained.html">5 DynamoDB</a>
+  <a href="06-building-the-jobs-api.html">6 Jobs API</a>
+  <a class="here" href="07-testing-debugging-and-habits.html">7 Debugging</a>
+</div></nav>
+
+<main>
+<header class="hero">
+  <div class="num">07</div>
+  <div class="kicker">Chapter 7 · All sprints</div>
+  <h1>Testing, debugging and good habits</h1>
+  <p class="sub">How to prove your code works, how to find out why it doesn't, and the daily habits that keep your AWS account safe and cheap. It's built from every real mistake we made while building TalentMatch.</p>
+  <div class="learn">
+    <h3>What you will learn</h3>
+    <ul>
+      <li>The four layers of tests and what each one catches</li>
+      <li>How to read an error and a stack trace, bottom up</li>
+      <li>A step-by-step playbook for "where did it break?"</li>
+      <li>Every error we hit, what caused it, and how we fixed it</li>
+      <li>A daily start/stop checklist and what to keep or destroy</li>
+      <li>Cost safety and security habits</li>
+      <li>Git habits: commits, tags, per-repo identity</li>
+      <li>How to keep a learning journal, and what comes next</li>
+    </ul>
+  </div>
+  <nav class="toc" aria-label="In this chapter">
+    <a href="#s1">7.1 Testing pyramid</a><a href="#s2">7.2 Reading errors</a><a href="#s3">7.3 Debugging playbook</a>
+    <a href="#s4">7.4 Error catalog</a><a href="#s5">7.5 Daily checklist</a><a href="#s6">7.6 Cost safety</a>
+    <a href="#s7">7.7 Security habits</a><a href="#s8">7.8 Git workflow</a><a href="#s9">7.9 Learning journal</a>
+    <a href="#s10">7.10 What's next</a><a href="#s11">7.11 Glossary</a><a href="#qa">Check yourself</a>
+  </nav>
+</header>
+
+<!-- ================= 7.1 ================= -->
+<section id="s1">
+<h2><span class="n">7.1</span>The testing pyramid</h2>
+<p class="lead">A test is a small program that checks your real program. You want <strong>many fast, cheap tests</strong> at the bottom and <strong>a few slow, realistic ones</strong> at the top.</p>
+
+<div class="box simple"><span class="label">In simple words</span>
+<p>Think of baking a cake. First you taste each ingredient: is the sugar sweet, are the eggs fresh? That's a <strong>unit test</strong>. Then you read the recipe card to check you wrote "2 eggs", not "20 eggs". That's a <strong>CDK test</strong>, checking the plan. Then you bake one cake and taste it: the <strong>live curl test</strong>. Finally a friend eats a whole slice at the party: the <strong>end-to-end test</strong>. Tasting sugar takes one second; baking takes an hour. So you taste ingredients often and bake rarely.</p>
+</div>
+
+<figure>
+  <svg viewBox="0 0 760 330" role="img" aria-label="Testing pyramid with four layers: unit tests at the bottom, CDK assertion tests, live curl tests, end-to-end tests at the top">
+    <polygon class="bx user" points="80,300 680,300 610,230 150,230"/>
+    <polygon class="bx code" points="150,225 610,225 545,160 215,160"/>
+    <polygon class="bx aws" points="215,155 545,155 480,90 280,90"/>
+    <polygon class="bx warn" points="280,85 480,85 380,20"/>
+    <text class="t" x="380" y="262" text-anchor="middle">Python unit tests (moto)</text>
+    <text class="s" x="380" y="282" text-anchor="middle">tests/api/*.py · 6 tests · under 1 second · fake DynamoDB</text>
+    <text class="t" x="380" y="192" text-anchor="middle">CDK assertion tests (Jest)</text>
+    <text class="s" x="380" y="211" text-anchor="middle">test/talentmatch.test.ts · 6 tests · checks the template</text>
+    <text class="t" x="380" y="122" text-anchor="middle">Live curl tests</text>
+    <text class="s" x="380" y="140" text-anchor="middle">real AWS · after deploy</text>
+    <text class="t" x="380" y="64" text-anchor="middle">E2E</text>
+    <text class="s" x="380" y="78" text-anchor="middle">Playwright</text>
+    <path class="w" d="M710 290 V40" marker-end="url(#ar)"/>
+    <text class="lb" x="696" y="30">slower</text>
+    <text class="lb" x="702" y="316">faster</text>
+    <path class="w" d="M45 40 V290" marker-end="url(#ar)"/>
+    <text class="lb" x="10" y="30">fewer</text>
+    <text class="lb" x="14" y="316">more</text>
+  </svg>
+  <figcaption>Figure 7.1 · Our testing pyramid. Most tests sit at the bottom, where they are fast and free.</figcaption>
+</figure>
+
+<div class="tw"><table>
+  <tr><th>Layer</th><th>Command</th><th>Where it runs</th><th>What it catches</th><th>What it can't catch</th></tr>
+  <tr><td><strong>Python unit tests</strong></td><td><code>python -m unittest discover -s tests/api -v</code></td><td>Your Mac, with a fake DynamoDB (moto)</td><td>Wrong logic: bad sorting, missing validation, wrong status codes, leaked <code>PK</code>/<code>SK</code></td><td>Missing IAM permissions, wrong route names in CDK</td></tr>
+  <tr><td><strong>CDK assertion tests</strong></td><td><code>npm test</code> (project root)</td><td>Your Mac, no AWS calls</td><td>The template is wrong: Python 3.12 not set, 7-day logs missing, bucket not private, route missing</td><td>Whether AWS accepts it, whether the code inside works</td></tr>
+  <tr><td><strong>Live curl tests</strong></td><td><code>curl -s $API/v1/jobs</code></td><td>Real AWS, after <code>cdk deploy</code></td><td>Permissions (<code>AccessDeniedException</code>), CORS, real routing, real DynamoDB</td><td>What a real user clicking in the browser sees</td></tr>
+  <tr><td><strong>End-to-end (later)</strong></td><td>Playwright, Sprint 13</td><td>A real browser driven by code</td><td>The full journey: sign in, create job, upload, rank</td><td>Nothing big, but slow, so keep few</td></tr>
+</table></div>
+
+<div class="box story"><span class="label">Real story from our build</span>
+<p>When we removed <code>"PK", "SK"</code> from the <code>to_public</code> exclusion list on purpose, <code>test_create_then_get</code> failed at <code>self.assertNotIn("PK", job)</code>. When we deleted <code>GSI1PK</code>, <code>test_list_paginates_newest_first</code> failed with <code>[]</code>, because of the sparse index. Each test protects <strong>one behaviour</strong>, and its name tells you which one broke.</p>
+</div>
+
+<h3>Technical terms</h3>
+<div class="tw"><table class="terms">
+  <tr><th>Term</th><th>Simple meaning</th><th>Example from our project</th></tr>
+  <tr><td>Unit test</td><td>Checks one small piece of code on its own</td><td><code>test_missing_title_is_rejected</code></td></tr>
+  <tr><td>Mock / fake</td><td>A pretend version of something real</td><td><code>@mock_aws</code> from moto pretends to be DynamoDB</td></tr>
+  <tr><td>Assertion</td><td>A "this must be true" check</td><td><code>self.assertEqual(status, 201)</code></td></tr>
+  <tr><td>Snapshot of a template</td><td>The CloudFormation JSON CDK produced</td><td><code>Template.fromStack(...)</code> in Jest</td></tr>
+  <tr><td>Smoke test</td><td>A quick "is it alive?" check after deploy</td><td><code>curl $API/v1/health</code></td></tr>
+  <tr><td>Regression</td><td>Something that used to work and broke again</td><td>A test that keeps failing until you fix it again</td></tr>
+</table></div>
+</section>
+
+<!-- ================= 7.2 ================= -->
+<section id="s2">
+<h2><span class="n">7.2</span>How to read an error message</h2>
+<p class="lead">Most errors tell you exactly what's wrong. Beginners panic at the wall of text; experts read the <strong>last line first</strong>, then walk up.</p>
+
+<div class="box simple"><span class="label">In simple words</span>
+<p>A stack trace is like a trail of footprints in the snow. The <strong>last footprint</strong> (the bottom line) is where the person fell. The footprints above show the path they walked to get there. Start where they fell, then look back to see which step went wrong.</p>
+</div>
+
+<p>Here's a real error from our build, when <code>app.py</code> passed <code>message=</code> twice to the <code>log()</code> function:</p>
+
+<figure>
+  <svg viewBox="0 0 760 300" role="img" aria-label="A Python stack trace annotated: read the last line first, then the line of your own code above it">
+    <rect class="bx data" x="10" y="10" width="520" height="280" rx="8"/>
+    <text class="m" x="24" y="38">Traceback (most recent call last):</text>
+    <text class="m" x="24" y="62">  File ".../tests/api/test_app.py", line 18,</text>
+    <text class="m" x="24" y="78">      in test_unknown_route_returns_404</text>
+    <text class="m" x="24" y="94">    res = app.handler({"routeKey": "GET /nope"}, ...)</text>
+    <rect class="bx warn" x="18" y="108" width="504" height="64" rx="5"/>
+    <text class="m" x="24" y="128">  File ".../src/api/app.py", line 46, in handler</text>
+    <text class="m" x="24" y="146">    log("WARNING", "Request failed", context, ...,</text>
+    <text class="m" x="24" y="162">        message=e.message, ...)</text>
+    <rect class="bx bad" x="18" y="190" width="504" height="44" rx="5"/>
+    <text class="m" x="24" y="208">TypeError: log() got multiple values</text>
+    <text class="m" x="24" y="224">           for argument 'message'</text>
+    <text class="s" x="24" y="268">Lines go from "who called" (top) to "where it broke" (bottom).</text>
+
+    <rect class="bx bad" x="560" y="186" width="190" height="52" rx="8"/>
+    <text class="t" x="572" y="207">1. Read this first</text>
+    <text class="s" x="572" y="224">the error type + reason</text>
+    <path class="w red" d="M558 212 H526" marker-end="url(#arr)"/>
+
+    <rect class="bx warn" x="560" y="112" width="190" height="56" rx="8"/>
+    <text class="t" x="572" y="133">2. Then this line</text>
+    <text class="s" x="572" y="150">lowest line in YOUR code</text>
+    <path class="w" d="M558 140 H526" marker-end="url(#ar)"/>
+
+    <rect class="bx" x="560" y="40" width="190" height="56" rx="8"/>
+    <text class="t" x="572" y="61">3. Context only</text>
+    <text class="s" x="572" y="78">who called it (the test)</text>
+    <path class="w dash" d="M558 68 H526" marker-end="url(#ar)"/>
+  </svg>
+  <figcaption>Figure 7.2 · Read a stack trace bottom up: the error, then your own code line, then the callers.</figcaption>
+</figure>
+
+<ol class="steps">
+  <li><strong>Read the last line.</strong> <code>TypeError</code> is the kind of error, and "got multiple values for argument 'message'" is the reason. A function received the same argument twice.</li>
+  <li><strong>Find the lowest line that is in YOUR code.</strong> <code>src/api/app.py, line 46</code>. Lines inside <code>/opt/homebrew/...</code> or <code>site-packages</code> are libraries; the bug is almost never there.</li>
+  <li><strong>Compare that line with the function definition.</strong> <code>def log(level, message, context, **fields)</code> already has <code>message</code> as its 2nd parameter, and line 46 also passed <code>message=e.message</code>.</li>
+  <li><strong>Fix the smallest thing.</strong> Rename the extra field: <code>error=e.message</code>.</li>
+  <li><strong>Re-run the same test.</strong> Prove the fix with the same command that showed the error.</li>
+</ol>
+
+<div class="tw"><table class="terms">
+  <tr><th>Error word</th><th>Simple meaning</th><th>Example we saw</th></tr>
+  <tr><td>TypeError</td><td>Wrong kind or number of things given to a function</td><td><code>log() got multiple values for argument 'message'</code></td></tr>
+  <tr><td>ValueError</td><td>Right type, wrong value</td><td><code>too many values to unpack</code> (health returned a dict, not a pair)</td></tr>
+  <tr><td>ModuleNotFoundError</td><td>Python can't find a file or package</td><td><code>No module named 'errors'</code> when the file was named <code>error.py</code></td></tr>
+  <tr><td>ImportError</td><td>A folder or module can't be loaded</td><td><code>Start directory is not importable: 'tests/api'</code></td></tr>
+  <tr><td>AssertionError</td><td>A test's "must be true" check was false</td><td><code>404 != 200</code></td></tr>
+  <tr><td>AccessDeniedException</td><td>AWS said "you're not allowed"</td><td>Lambda without <code>grantReadWriteData</code></td></tr>
+  <tr><td>ResourceNotFoundException</td><td>AWS can't find the thing you named</td><td>Wrong log group name in <code>aws logs tail</code></td></tr>
+  <tr><td>403 / 404 / 500</td><td>HTTP for "forbidden" / "not found" / "server crashed"</td><td><code>git push</code> 403, unknown route 404, bug 500</td></tr>
+</table></div>
+
+<div class="box warn"><span class="label">Watch out</span>
+<p>An error can <strong>hide another error</strong>. Our health test said <code>404 != 200</code>, but the real problem was a crash (<code>ValueError</code>) that the code caught and then fell through to <code>return 404</code>. If an error doesn't make sense, ask "did something earlier fail silently?"</p>
+</div>
+</section>
+
+<!-- ================= 7.3 ================= -->
+<section id="s3">
+<h2><span class="n">7.3</span>The debugging playbook</h2>
+<p class="lead">The first question is never "what's wrong?". It's "<strong>where</strong> did it stop?". Each place has its own tool to look at.</p>
+
+<div class="box simple"><span class="label">In simple words</span>
+<p>If a parcel doesn't arrive, you don't guess. You check the tracking: did it leave the shop? Did it reach the city? Did the van deliver it? Software is the same. Find the <strong>last checkpoint where things were still fine</strong>, and the problem is just after it.</p>
+</div>
+
+<figure>
+  <svg viewBox="0 0 760 560" role="img" aria-label="Debugging flowchart from the Mac through CDK synth, deploy, API Gateway, Lambda and AWS permissions">
+    <rect class="bx user" x="270" y="10" width="220" height="40" rx="20"/>
+    <text class="t" x="320" y="35">Something failed</text>
+    <path class="w" d="M380 50 V70" marker-end="url(#ar)"/>
+
+    <!-- row 1 -->
+    <rect class="bx warn" x="250" y="74" width="260" height="44" rx="8"/>
+    <text class="t" x="264" y="94">1. On my Mac, before AWS?</text>
+    <text class="s" x="264" y="110">npm build, tests, git, python</text>
+    <path class="w" d="M510 96 H540" marker-end="url(#ar)"/>
+    <text class="lb" x="514" y="90">yes</text>
+    <rect class="bx" x="545" y="74" width="205" height="44" rx="8"/>
+    <text class="t" x="557" y="94">Read terminal output</text>
+    <text class="s" x="557" y="110">pwd, ls, last line of error</text>
+    <path class="w" d="M380 118 V138" marker-end="url(#ar)"/>
+    <text class="lb" x="386" y="132">no</text>
+
+    <!-- row 2 -->
+    <rect class="bx warn" x="250" y="142" width="260" height="44" rx="8"/>
+    <text class="t" x="264" y="162">2. During cdk synth / diff?</text>
+    <text class="s" x="264" y="178">TypeScript, missing asset</text>
+    <path class="w" d="M510 164 H540" marker-end="url(#ar)"/>
+    <text class="lb" x="514" y="158">yes</text>
+    <rect class="bx" x="545" y="142" width="205" height="44" rx="8"/>
+    <text class="t" x="557" y="162">Fix lib/ or bin/ code</text>
+    <text class="s" x="557" y="178">frontend/dist built? logged in?</text>
+    <path class="w" d="M380 186 V206" marker-end="url(#ar)"/>
+    <text class="lb" x="386" y="200">no</text>
+
+    <!-- row 3 -->
+    <rect class="bx warn" x="250" y="210" width="260" height="44" rx="8"/>
+    <text class="t" x="264" y="230">3. During cdk deploy?</text>
+    <text class="s" x="264" y="246">CREATE_FAILED, ROLLBACK</text>
+    <path class="w" d="M510 232 H540" marker-end="url(#ar)"/>
+    <text class="lb" x="514" y="226">yes</text>
+    <rect class="bx aws" x="545" y="210" width="205" height="44" rx="8"/>
+    <text class="t" x="557" y="230">CloudFormation Events</text>
+    <text class="s" x="557" y="246">first red row = real reason</text>
+    <path class="w" d="M380 254 V274" marker-end="url(#ar)"/>
+    <text class="lb" x="386" y="268">no</text>
+
+    <!-- row 4 -->
+    <rect class="bx warn" x="250" y="278" width="260" height="44" rx="8"/>
+    <text class="t" x="264" y="298">4. No Lambda log line?</text>
+    <text class="s" x="264" y="314">e.g. {"message":"Not Found"}</text>
+    <path class="w" d="M510 300 H540" marker-end="url(#ar)"/>
+    <text class="lb" x="514" y="294">yes</text>
+    <rect class="bx aws" x="545" y="278" width="205" height="44" rx="8"/>
+    <text class="t" x="557" y="298">API Gateway routes</text>
+    <text class="s" x="557" y="314">method + path exist? CORS?</text>
+    <path class="w" d="M380 322 V342" marker-end="url(#ar)"/>
+    <text class="lb" x="386" y="336">no</text>
+
+    <!-- row 5 -->
+    <rect class="bx warn" x="250" y="346" width="260" height="44" rx="8"/>
+    <text class="t" x="264" y="366">5. Lambda logged ERROR?</text>
+    <text class="s" x="264" y="382">client got 500 INTERNAL</text>
+    <path class="w" d="M510 368 H540" marker-end="url(#ar)"/>
+    <text class="lb" x="514" y="362">yes</text>
+    <rect class="bx code" x="545" y="346" width="205" height="44" rx="8"/>
+    <text class="t" x="557" y="366">aws logs tail</text>
+    <text class="s" x="557" y="382">/talentmatch/dev/api, trace</text>
+    <path class="w" d="M380 390 V410" marker-end="url(#ar)"/>
+    <text class="lb" x="386" y="404">no</text>
+
+    <!-- row 6 -->
+    <rect class="bx warn" x="250" y="414" width="260" height="44" rx="8"/>
+    <text class="t" x="264" y="434">6. AccessDenied in logs?</text>
+    <text class="s" x="264" y="450">"not authorized to perform"</text>
+    <path class="w" d="M510 436 H540" marker-end="url(#ar)"/>
+    <text class="lb" x="514" y="430">yes</text>
+    <rect class="bx aws" x="545" y="414" width="205" height="44" rx="8"/>
+    <text class="t" x="557" y="434">IAM: add the grant</text>
+    <text class="s" x="557" y="450">table.grantReadWriteData(fn)</text>
+    <path class="w" d="M380 458 V478" marker-end="url(#ar)"/>
+    <text class="lb" x="386" y="472">no</text>
+
+    <rect class="bx user" x="250" y="482" width="260" height="58" rx="8"/>
+    <text class="t" x="264" y="503">7. It's your logic</text>
+    <text class="s" x="264" y="520">write a unit test that fails,</text>
+    <text class="s" x="264" y="534">fix code until it passes</text>
+
+    <!-- left column: where -->
+    <text class="gt" x="20" y="100">YOUR MAC</text>
+    <text class="gt" x="20" y="168">CDK</text>
+    <text class="gt" x="20" y="236">CLOUDFORMATION</text>
+    <text class="gt" x="20" y="304">API GATEWAY</text>
+    <text class="gt" x="20" y="372">LAMBDA</text>
+    <text class="gt" x="20" y="440">IAM</text>
+    <text class="gt" x="20" y="512">YOUR CODE</text>
+  </svg>
+  <figcaption>Figure 7.3 · Walk down the checkpoints. The first "yes" tells you which log or tool to open.</figcaption>
+</figure>
+
+<div class="tw"><table>
+  <tr><th>Where it stopped</th><th>Tool to look at</th><th>Exact command or place</th></tr>
+  <tr><td>My Mac</td><td>Terminal output</td><td><code>pwd</code>, <code>ls</code>, <code>which python</code>, <code>npm run</code> (lists scripts)</td></tr>
+  <tr><td>Who am I in AWS?</td><td>STS</td><td><code>aws sts get-caller-identity</code></td></tr>
+  <tr><td>CDK synth</td><td>The template</td><td><code>npx cdk synth TalentMatch-dev</code>, and look inside <code>cdk.out/</code></td></tr>
+  <tr><td>CloudFormation deploy</td><td>Stack events</td><td>Console → CloudFormation → TalentMatch-dev → <strong>Events</strong></td></tr>
+  <tr><td>API Gateway</td><td>Status + headers</td><td><code>curl -i $API/...</code>; if there's no Lambda log line, the API answered by itself</td></tr>
+  <tr><td>Lambda</td><td>CloudWatch Logs</td><td><code>aws logs tail /talentmatch/dev/api --follow</code></td></tr>
+  <tr><td>Browser</td><td>DevTools</td><td>Console tab (CORS errors), Network tab (status, response headers)</td></tr>
+  <tr><td>Data</td><td>DynamoDB console</td><td>Tables → Explore table items → query the GSI1 index</td></tr>
+</table></div>
+
+<div class="box tech"><span class="label">Technical view</span>
+<p>Every request carries a <strong>request ID</strong>. Our <code>log()</code> function writes it into every line as <code>request_id</code>. When a user reports "it broke at 10:42", you search the logs for the 500 around that time, copy its <code>request_id</code>, and filter on it. Now you see only that one request's story.</p>
+</div>
+</section>
+
+<!-- ================= 7.4 ================= -->
+<section id="s4">
+<h2><span class="n">7.4</span>Every error we hit, and what it taught us</h2>
+<p class="lead">This is the real list from building Sprints 0–2a. Each row is a lesson you only have to learn once.</p>
+
+<div class="tw"><table>
+  <tr><th>Symptom</th><th>Real cause</th><th>Fix</th><th>Lesson</th></tr>
+  <tr><td><code>Your session has expired. Please reauthenticate using 'aws login'</code></td><td>Temporary credentials from <code>aws login</code> only last a few hours</td><td><code>aws login</code></td><td>Start each session with <code>aws sts get-caller-identity</code></td></tr>
+  <tr><td><code>Unable to resolve AWS account to use</code> on <code>cdk deploy</code></td><td>Same expired login (a new day). <code>CDK_DEFAULT_ACCOUNT</code> comes from asking AWS "who am I?"</td><td><code>aws login</code>; check <code>echo $AWS_PROFILE</code> prints <code>talentmatch</code></td><td>A CDK error can really be a login error</td></tr>
+  <tr><td><code>ResourceNotFoundException ... The specified log group does not exist</code></td><td>We passed our own <code>LogGroup</code> without a name, so CloudFormation generated one. <code>/aws/lambda/&lt;fn&gt;</code> was never used.</td><td>Set <code>logGroupName</code> to <code>/talentmatch/dev/api</code> (by stage) and add an <code>ApiLogGroup</code> output</td><td>Give important resources predictable names and outputs</td></tr>
+  <tr><td><code>npm error Missing script: "test"</code></td><td>Ran <code>npm test</code> inside <code>frontend/</code>, whose <code>package.json</code> has no <code>test</code> script</td><td><code>cd ..</code> back to the project root</td><td>npm only reads the current folder's <code>package.json</code>. Use <code>pwd</code>.</td></tr>
+  <tr><td>Frontend JSX errors in root <code>npm run build</code></td><td>The root <code>tsconfig.json</code> compiles every <code>.ts</code>/<code>.tsx</code> below it, including React files</td><td>Add <code>"frontend"</code> to <code>exclude</code></td><td>Two projects in one folder need clear borders</td></tr>
+  <tr><td>Browser says <code>Failed to fetch</code> (CORS error in Console)</td><td>The API didn't allow the page's origin (<code>localhost:5173</code> / CloudFront)</td><td><code>corsPreflight.allowOrigins</code>; add <code>POST</code> to <code>allowMethods</code></td><td>curl ignores CORS, browsers enforce it</td></tr>
+  <tr><td><code>Permission to ByteShah/talentmatch.git denied to jash-yulara</code> (403)</td><td>The macOS keychain sent the saved <code>jash-yulara</code> GitHub login for every github.com push</td><td>Put <code>ByteShah@</code> in the remote URL (command below the table) and paste a ByteShah token. If <code>gh</code> overrides it, reset <code>credential.helper</code> for this repo.</td><td><code>user.name</code>/<code>user.email</code> only label commits. Login comes from the URL plus saved credentials.</td></tr>
+  <tr><td><code>Start directory is not importable: 'tests/api'</code></td><td>Python tests were in <code>test/api</code> (singular); the folder in the command didn't exist</td><td>Move them to <code>tests/api</code></td><td>This error means "that folder isn't there from where you stand"</td></tr>
+  <tr><td>Only 2 of 6 tests ran, silently</td><td><code>text_app.py</code> (typo), and the 4 job tests were not indented inside <code>class JobsTest</code></td><td>Rename to <code>test_app.py</code>; indent the methods</td><td>unittest only finds <code>test*.py</code> files and methods inside a TestCase class</td></tr>
+  <tr><td><code>No module named 'errors'</code> (would happen)</td><td>File was <code>error.py</code>, code imported <code>errors</code></td><td>Rename to <code>errors.py</code></td><td>File names are part of the code</td></tr>
+  <tr><td><code>TypeError: log() got multiple values for argument 'message'</code></td><td><code>message=</code> passed twice to <code>log()</code></td><td>Use <code>error=e.message</code></td><td>Never reuse a parameter name in <code>**fields</code></td></tr>
+  <tr><td>Health test: <code>AssertionError: 404 != 200</code></td><td>3 bugs: <code>health</code> returned a response dict, not <code>(status, body)</code>; unpacking crashed; <code>except Exception</code> didn't return, so it fell to <code>return 404</code></td><td>Return a pair; make the crash branch return 500</td><td>An error handler must never disguise a bug as "not found"</td></tr>
+  <tr><td>Newest-first list was random</td><td><code>GSI1SK = "JOB#&lt;uuid&gt;"</code> sorts by random ID</td><td><code>GSI1SK = f"{now}#{job_id}"</code></td><td>The sort key decides the order. Put time first.</td></tr>
+  <tr><td><code>npm test</code> found no CDK tests</td><td><code>talentmatch.test.ts</code> was in <code>tests/</code>, but <code>jest.config.js</code> says <code>roots: ['&lt;rootDir&gt;/test']</code></td><td><code>git mv tests/talentmatch.test.ts test/</code></td><td><code>test/</code> = Jest (CDK), <code>tests/</code> = Python</td></tr>
+  <tr><td>A stack existed after a deploy was "rejected"</td><td>The deploy command had already started creating resources before it was stopped</td><td>Checked with <code>describe-stacks</code>, then deleted the stack</td><td>Stopping a command isn't undoing it. Always check what's really in AWS.</td></tr>
+</table></div>
+
+<p>The git fix, for this repo only:</p>
+<pre class="term"><span class="p">$ </span>git remote set-url origin https://ByteShah@github.com/ByteShah/talentmatch.git
+<span class="p">$ </span>git remote -v                <span class="c"># both lines must show ByteShah@github.com</span>
+<span class="p">$ </span>git config --show-origin --get-all credential.helper   <span class="c"># gh auth git-credential here?</span>
+<span class="p">$ </span>git config --local credential.helper ""
+<span class="p">$ </span>git config --local --add credential.helper osxkeychain</pre>
+
+<div class="box story"><span class="label">Real story from our build</span>
+<p>The git 403 took two tries. The first time, only <code>user.name</code> and <code>user.email</code> were set, and the push failed again with the same message. The clue was in the error URL: it still said <code>https://github.com/ByteShah/...</code> with no <code>ByteShah@</code>. Read the error closely; it often shows exactly what was used.</p>
+</div>
+</section>
+
+<!-- ================= 7.5 ================= -->
+<section id="s5">
+<h2><span class="n">7.5</span>The daily start / stop checklist</h2>
+<p class="lead">Same steps every session, in the same order. That's how you stop forgetting things.</p>
+
+<figure>
+  <svg viewBox="0 0 760 250" role="img" aria-label="Daily loop: log in, activate venv, change code, test, deploy, check live, commit and tag, destroy">
+    <rect class="bx user" x="20" y="30" width="160" height="56" rx="8"/><text class="t" x="34" y="53">1. aws login</text><text class="s" x="34" y="71">get-caller-identity</text>
+    <path class="w" d="M180 58 H205" marker-end="url(#ar)"/>
+    <rect class="bx" x="210" y="30" width="160" height="56" rx="8"/><text class="t" x="224" y="53">2. Set up shell</text><text class="s" x="224" y="71">source .venv/bin/activate</text>
+    <path class="w" d="M370 58 H395" marker-end="url(#ar)"/>
+    <rect class="bx code" x="400" y="30" width="160" height="56" rx="8"/><text class="t" x="414" y="53">3. Change code</text><text class="s" x="414" y="71">src/, lib/, frontend/</text>
+    <path class="w" d="M560 58 H585" marker-end="url(#ar)"/>
+    <rect class="bx code" x="590" y="30" width="150" height="56" rx="8"/><text class="t" x="604" y="53">4. Test locally</text><text class="s" x="604" y="71">unittest + npm test</text>
+    <path class="w" d="M665 86 V150" marker-end="url(#ar)"/>
+    <rect class="bx aws" x="590" y="154" width="150" height="56" rx="8"/><text class="t" x="604" y="177">5. diff + deploy</text><text class="s" x="604" y="195">read the diff first</text>
+    <path class="w" d="M590 182 H565" marker-end="url(#ar)"/>
+    <rect class="bx aws" x="400" y="154" width="160" height="56" rx="8"/><text class="t" x="414" y="177">6. Test live</text><text class="s" x="414" y="195">curl + logs + console</text>
+    <path class="w" d="M400 182 H375" marker-end="url(#ar)"/>
+    <rect class="bx user" x="210" y="154" width="160" height="56" rx="8"/><text class="t" x="224" y="177">7. Commit + journal</text><text class="s" x="224" y="195">git tag sprint-N</text>
+    <path class="w" d="M210 182 H185" marker-end="url(#ar)"/>
+    <rect class="bx bad" x="20" y="154" width="160" height="56" rx="8"/><text class="t" x="34" y="177">8. cdk destroy</text><text class="s" x="34" y="195">when you stop today</text>
+    <path class="w dash" d="M480 154 V125 H480 V90" marker-end="url(#ar)"/>
+    <text class="lb" x="488" y="128">bug? back to 3</text>
+  </svg>
+  <figcaption>Figure 7.4 · The daily loop. If a live test fails, go back to step 3, never straight to "deploy again".</figcaption>
+</figure>
+
+<div class="two">
+<div class="card"><h4>Start of session</h4>
+<pre class="term"><span class="p">$ </span>cd ~/Work/labs/talentmatch
+<span class="p">$ </span>echo $AWS_PROFILE        <span class="c"># talentmatch</span>
+<span class="p">$ </span>aws login
+<span class="p">$ </span>aws sts get-caller-identity
+<span class="p">$ </span>source .venv/bin/activate
+<span class="p">$ </span>git status               <span class="c"># clean?</span></pre></div>
+<div class="card"><h4>End of session</h4>
+<pre class="term"><span class="p">$ </span>python -m unittest discover -s tests/api
+<span class="p">$ </span>npm run build &amp;&amp; npm test
+<span class="p">$ </span>git add -A
+<span class="p">$ </span>git commit -m "Sprint 2a: ..."
+<span class="p">$ </span>git push
+<span class="p">$ </span>npx cdk destroy TalentMatch-dev</pre></div>
+</div>
+
+<div class="box warn"><span class="label">Watch out</span>
+<p>After <code>cdk destroy</code> and a fresh deploy, the <strong>API URL and CloudFront URL change</strong>. The deployed site fixes itself, because CDK regenerates <code>config.json</code>. Your local <code>frontend/public/config.json</code> does not, so copy the new <code>ApiUrl</code> into it.</p>
+</div>
+
+<h3>Keep or destroy?</h3>
+<div class="tw"><table>
+  <tr><th>Thing</th><th>Action</th><th>Why</th></tr>
+  <tr><td><code>CDKToolkit</code> stack</td><td><span class="pill green">Keep forever</span></td><td>Created by <code>cdk bootstrap</code>. Every deploy needs it.</td></tr>
+  <tr><td><code>cdk-hnb659fds-assets-143495498376-ap-south-1</code> bucket</td><td><span class="pill green">Keep forever</span></td><td>Holds your zipped code and templates during deploys. Fractions of a cent.</td></tr>
+  <tr><td><code>talentmatch-monthly</code> budget ($15)</td><td><span class="pill green">Keep</span></td><td>Your alarm bell</td></tr>
+  <tr><td><code>TalentMatch-dev</code> stack</td><td><span class="pill amber">Destroy when you stop</span></td><td>Recreated in ~2–10 minutes by <code>cdk deploy</code></td></tr>
+  <tr><td>Lab resources (<code>lab-s2</code> table)</td><td><span class="pill red">Delete the same day</span></td><td>Created by hand, so no stack will clean them up</td></tr>
+  <tr><td>Anything CDK made (web bucket, table, Lambda)</td><td><span class="pill red">Never delete by hand</span></td><td>Use <code>cdk destroy</code>, or the stack drifts and later deploys fail</td></tr>
+</table></div>
+</section>
+
+<!-- ================= 7.6 ================= -->
+<section id="s6">
+<h2><span class="n">7.6</span>Cost safety</h2>
+<p class="lead">Serverless costs nothing while idle, but a few services charge every hour they exist. Know which ones.</p>
+
+<div class="box simple"><span class="label">In simple words</span>
+<p>Serverless is like a taxi: you pay only for the ride. Some services are like renting a car: you pay every day it sits in your driveway, even if you never drive it. Our plan only uses taxis.</p>
+</div>
+
+<div class="two">
+<div class="box danger"><span class="label">Costs money while idle: never create</span>
+<ul>
+  <li>NAT Gateway: about $32/month</li>
+  <li>OpenSearch Serverless: about $175/month minimum</li>
+  <li>Aurora / RDS: $45+/month</li>
+  <li>Amazon Kendra: hundreds per month</li>
+  <li>VPC interface endpoints: about $7/month each</li>
+  <li>Bedrock provisioned throughput</li>
+</ul></div>
+<div class="box simple"><span class="label">Free or pennies at our size</span>
+<ul>
+  <li>Lambda: 1M requests/month always free</li>
+  <li>CloudFront: 1 TB + 10M requests always free</li>
+  <li>CloudWatch Logs: 5 GB free; ours kept 7 days</li>
+  <li>DynamoDB on-demand: pay per request</li>
+  <li>API Gateway HTTP API: about $1 per million</li>
+  <li>S3: under $0.01 for our few MB</li>
+</ul></div>
+</div>
+
+<ul class="check">
+  <li><strong>Budget alert:</strong> <code>talentmatch-monthly</code> at $15. It emails before you're surprised.</li>
+  <li><strong>Cost Explorer weekly:</strong> Billing → Cost Explorer → group by Service.</li>
+  <li><strong>Activate the cost tag once:</strong> Billing → Cost allocation tags → <code>project</code> → Activate. Tags only appear in Cost Explorer after this, and data takes up to 24 hours.</li>
+  <li><strong>Credits / free tier:</strong> Billing → Free Tier (or Credits). The trial ends, but habits stay.</li>
+  <li><strong>Destroy dev when you stop:</strong> the cheapest resource is one that doesn't exist.</li>
+</ul>
+</section>
+
+<!-- ================= 7.7 ================= -->
+<section id="s7">
+<h2><span class="n">7.7</span>Security habits</h2>
+<p class="lead">Most cloud security disasters come from four simple mistakes. Avoid them from day one.</p>
+
+<figure>
+  <svg viewBox="0 0 760 210" role="img" aria-label="Four security habits: temporary credentials, least privilege, private by default, no secrets in git">
+    <rect class="bx aws" x="10" y="20" width="175" height="170" rx="10"/>
+    <text class="t" x="24" y="46">No access keys</text>
+    <text class="s" x="24" y="68">aws login gives</text>
+    <text class="s" x="24" y="84">temporary credentials</text>
+    <text class="s" x="24" y="100">that expire by themselves.</text>
+    <text class="s" x="24" y="124">~/.aws/credentials has</text>
+    <text class="s" x="24" y="140">no stored keys.</text>
+    <rect class="bx aws" x="200" y="20" width="175" height="170" rx="10"/>
+    <text class="t" x="214" y="46">Least privilege</text>
+    <text class="s" x="214" y="68">Each Lambda can do only</text>
+    <text class="s" x="214" y="84">what it needs, on only</text>
+    <text class="s" x="214" y="100">its own resources.</text>
+    <text class="m" x="214" y="124">grantReadWriteData</text>
+    <text class="s" x="214" y="140">= one table + its indexes</text>
+    <rect class="bx aws" x="390" y="20" width="175" height="170" rx="10"/>
+    <text class="t" x="404" y="46">Private by default</text>
+    <text class="s" x="404" y="68">Web bucket: BLOCK_ALL,</text>
+    <text class="s" x="404" y="84">enforceSSL, encryption.</text>
+    <text class="s" x="404" y="100">Only CloudFront (OAC)</text>
+    <text class="s" x="404" y="116">can read it.</text>
+    <text class="s" x="404" y="140">Direct S3 URL = 403</text>
+    <rect class="bx aws" x="580" y="20" width="170" height="170" rx="10"/>
+    <text class="t" x="594" y="46">No secrets in git</text>
+    <text class="s" x="594" y="68">.gitignore keeps out</text>
+    <text class="s" x="594" y="84">.venv, node_modules,</text>
+    <text class="s" x="594" y="100">cdk.out, dist, *.local.</text>
+    <text class="s" x="594" y="124">Tokens are pasted at</text>
+    <text class="s" x="594" y="140">prompts, never in files.</text>
+  </svg>
+  <figcaption>Figure 7.5 · The four security habits we already use in TalentMatch.</figcaption>
+</figure>
+
+<div class="tw"><table class="terms">
+  <tr><th>.gitignore line</th><th>What it keeps out</th><th>Why</th></tr>
+  <tr><td><code>node_modules</code></td><td>Installed npm packages</td><td>Huge, and rebuilt by <code>npm install</code></td></tr>
+  <tr><td><code>.venv</code></td><td>Python packages for this project</td><td>Rebuilt by <code>pip install -r requirements-dev.txt</code></td></tr>
+  <tr><td><code>cdk.out</code></td><td>Generated templates and zips</td><td>Regenerated on every synth</td></tr>
+  <tr><td><code>*.js</code>, <code>*.d.ts</code> (root)</td><td>Compiled TypeScript output</td><td>Only the <code>.ts</code> source matters</td></tr>
+  <tr><td><code>*.pyc</code></td><td>Python bytecode caches</td><td>Machine-specific</td></tr>
+  <tr><td><code>dist</code>, <code>*.local</code> (frontend)</td><td>The built UI, local env files</td><td>Rebuilt by <code>npm run build</code>; local files may hold settings</td></tr>
+</table></div>
+
+<div class="box warn"><span class="label">Watch out</span>
+<p><code>frontend/public/config.json</code> is <strong>not</strong> in any <code>.gitignore</code> yet. It only holds your dev API URL, which isn't a secret, but it changes on every redeploy. Add the line <code>frontend/public/config.json</code> to the root <code>.gitignore</code> so it stops showing up in <code>git status</code>.</p>
+</div>
+</section>
+
+<!-- ================= 7.8 ================= -->
+<section id="s8">
+<h2><span class="n">7.8</span>Git workflow</h2>
+<p class="lead">Small commits, one tag per sprint, and the right identity per repo.</p>
+
+<figure>
+  <svg viewBox="0 0 760 170" role="img" aria-label="Git history line showing commits and the sprint-1 tag">
+    <path class="w" d="M40 80 H720"/>
+    <circle class="fill-muted" cx="70" cy="80" r="9"/>
+    <circle class="fill-blue" cx="220" cy="80" r="9"/>
+    <circle class="fill-muted" cx="370" cy="80" r="9"/>
+    <circle class="fill-muted" cx="520" cy="80" r="9"/>
+    <circle class="fill-green" cx="670" cy="80" r="9"/>
+    <text class="m" x="40" y="115">7ecc4ec</text><text class="s" x="40" y="131">Initial commit</text>
+    <text class="m" x="190" y="115">e73418d</text><text class="s" x="168" y="131">Sprint 1: walking skeleton</text>
+    <text class="m" x="340" y="115">4025847</text><text class="s" x="320" y="131">[ADD] log group name</text>
+    <text class="m" x="490" y="115">4536745</text><text class="s" x="462" y="131">Dummy data for DynamoDB</text>
+    <text class="m" x="650" y="115">next</text><text class="s" x="625" y="131">Sprint 2a: jobs API</text>
+    <rect class="bx aws" x="180" y="22" width="80" height="26" rx="13"/><text class="gt" x="192" y="40">sprint-1</text>
+    <path class="w blue" d="M220 48 V68"/>
+    <rect class="bx user" x="625" y="22" width="90" height="26" rx="13"/><text class="gt" x="634" y="40">sprint-2a</text>
+    <path class="w green dash" d="M670 48 V68"/>
+  </svg>
+  <figcaption>Figure 7.6 · Your real history. A tag is a bookmark on one commit, so you can always go back to "the end of Sprint 1".</figcaption>
+</figure>
+
+<div class="tw"><table>
+  <tr><th>Command</th><th>What it does</th></tr>
+  <tr><td><code>git status</code></td><td>What changed and what's staged. Run it before every commit.</td></tr>
+  <tr><td><code>git add -A &amp;&amp; git commit -m "..."</code></td><td>Save a snapshot with a message that says <em>why</em></td></tr>
+  <tr><td><code>git tag sprint-1</code> then <code>git push --tags</code></td><td>Bookmark the end of a sprint and send the tag to GitHub</td></tr>
+  <tr><td><code>git log --oneline -10</code></td><td>The last 10 commits, one line each</td></tr>
+  <tr><td><code>git log --format='%h %an &lt;%ae&gt; %s' -5</code></td><td>Who authored each commit, to check the identity</td></tr>
+  <tr><td><code>git config user.name "ByteShah"</code> (no <code>--global</code>)</td><td>Author name for <strong>this repo only</strong></td></tr>
+  <tr><td><code>git remote -v</code></td><td>Where pushes go, and as which username (<code>ByteShah@github.com</code>)</td></tr>
+  <tr><td><code>git mv old new</code></td><td>Rename or move a file and keep its history</td></tr>
+</table></div>
+
+<div class="box tech"><span class="label">Technical view</span>
+<p>Two different "who"s: <strong>author</strong> (<code>user.name</code>/<code>user.email</code>, written into each commit) and <strong>authentication</strong> (the credentials sent when pushing, picked by the remote URL and the credential helper: macOS keychain, or <code>gh auth git-credential</code>). Changing one never changes the other.</p>
+</div>
+</section>
+
+<!-- ================= 7.9 ================= -->
+<section id="s9">
+<h2><span class="n">7.9</span>The learning journal</h2>
+<p class="lead">One short entry per session in <code>docs/journal.md</code>. Writing it down is what turns "I did it once" into "I understand it".</p>
+
+<div class="box simple"><span class="label">In simple words</span>
+<p>It's a diary for your brain. Tomorrow-you won't remember why the logs didn't show up. Today-you can write it down in three lines.</p>
+</div>
+
+<h3>A good entry has four parts</h3>
+<div class="file">docs/journal.md</div>
+<pre class="code"><span class="k">## 2026-10-07 · Sprint 2a (DynamoDB + jobs API)</span>
+
+<span class="k">Did:</span> Lab with a throwaway table, then create/get/list jobs with a GSI and pagination.
+
+<span class="k">Learned:</span> A scan pays for every item it reads (ScannedCount), not what it returns.
+The sort key decides order: GSI1SK must start with the time for newest-first.
+
+<span class="k">Broke:</span> health returned 404. Really a crash hidden by an except that fell through
+to "return 404". Fixed by returning 500 from the crash branch.
+
+<span class="k">Questions:</span> Why is GSI1PK = "JOB" a problem at millions of jobs?</pre>
+
+<ul class="check">
+  <li><strong>Did:</strong> one sentence, what you built</li>
+  <li><strong>Learned:</strong> 1–3 facts, in your own words</li>
+  <li><strong>Broke:</strong> the error, the real cause, the fix</li>
+  <li><strong>Questions:</strong> what you'll ask or look up next time</li>
+</ul>
+<p>Also write the answers to each sprint's self-check questions. That's what the plan asks for before moving to the next sprint.</p>
+</section>
+
+<!-- ================= 7.10 ================= -->
+<section id="s10">
+<h2><span class="n">7.10</span>Where we go next</h2>
+<p class="lead">You've finished Sprints 0, 1 and 2a. Here's the road ahead and what each stop teaches.</p>
+
+<figure>
+  <svg viewBox="0 0 760 420" role="img" aria-label="Roadmap of sprints from 2b to 15 grouped by milestone">
+    <path class="w" d="M30 40 V400"/>
+    <text class="gt" x="45" y="30">MILESTONE 1 · FOUNDATION</text>
+    <circle class="fill-green" cx="30" cy="55" r="7"/><text class="t" x="50" y="60">2b Edit + idempotency</text><text class="s" x="300" y="60">UpdateItem, conditional writes, retries without duplicates</text>
+    <circle class="fill-muted" cx="30" cy="82" r="7"/><text class="t" x="50" y="87">2c Jobs UI + OpenAPI</text><text class="s" x="300" y="87">React pages, typed API client, API description</text>
+    <circle class="fill-muted" cx="30" cy="109" r="7"/><text class="t" x="50" y="114">3 Identity and access</text><text class="s" x="300" y="114">Cognito, JWT tokens, roles, 401 vs 403, audit log</text>
+    <circle class="fill-muted" cx="30" cy="136" r="7"/><text class="t" x="50" y="141">4 Delivery pipeline</text><text class="s" x="300" y="141">GitHub Actions, OIDC (no keys), scans, dev → prod</text>
+
+    <text class="gt" x="45" y="174">MILESTONE 2 · RESUME INTELLIGENCE</text>
+    <circle class="fill-muted" cx="30" cy="196" r="7"/><text class="t" x="50" y="201">5 Resume intake</text><text class="s" x="300" y="201">S3 presigned URLs, file checks, duplicates</text>
+    <circle class="fill-muted" cx="30" cy="223" r="7"/><text class="t" x="50" y="228">6 Event-driven</text><text class="s" x="300" y="228">EventBridge, async Lambda, Textract OCR</text>
+    <circle class="fill-muted" cx="30" cy="250" r="7"/><text class="t" x="50" y="255">7 AI skill extraction</text><text class="s" x="300" y="255">Bedrock Haiku 4.5, JSON schema, prompt injection</text>
+    <circle class="fill-muted" cx="30" cy="277" r="7"/><text class="t" x="50" y="282">8 Reliable pipeline</text><text class="s" x="300" y="282">Step Functions, retries, SQS dead-letter queues</text>
+
+    <text class="gt" x="45" y="315">MILESTONE 3 + 4 · MATCHING AND PRODUCTION</text>
+    <circle class="fill-muted" cx="30" cy="337" r="7"/><text class="t" x="50" y="342">9–11 Match, search, hire</text><text class="s" x="300" y="342">scorer, embeddings, S3 Vectors, SES email</text>
+    <circle class="fill-muted" cx="30" cy="364" r="7"/><text class="t" x="50" y="369">12–13 Privacy, quality</text><text class="s" x="300" y="369">TTL, erasure, security headers, Playwright</text>
+    <circle class="fill-muted" cx="30" cy="391" r="7"/><text class="t" x="50" y="396">14–15 Ops and go-live</text><text class="s" x="300" y="396">alarms, X-Ray, backups, load test, Well-Architected</text>
+  </svg>
+  <figcaption>Figure 7.7 · The road from 2b to go-live. The green dot is the next stop.</figcaption>
+</figure>
+</section>
+
+<!-- ================= 7.11 ================= -->
+<section id="s11">
+<h2><span class="n">7.11</span>Glossary of everything</h2>
+<p class="lead">Every technical word from the whole book, A to Z, in one place.</p>
+
+<div class="tw"><table class="terms">
+  <tr><th>Term</th><th>Simple meaning</th><th>Example</th></tr>
+  <tr><td>Access pattern</td><td>A question your app asks the database</td><td>"List all jobs, newest first"</td></tr>
+  <tr><td>API</td><td>A door other programs knock on to use your app</td><td><code>GET /v1/jobs</code></td></tr>
+  <tr><td>API Gateway (HTTP API)</td><td>AWS's front door that turns web requests into Lambda calls</td><td><code>talentmatch-dev</code></td></tr>
+  <tr><td>Assertion</td><td>A "this must be true" check in a test</td><td><code>assertEqual(status, 201)</code></td></tr>
+  <tr><td>Asset</td><td>A file CDK zips and uploads during deploy</td><td><code>src/api</code>, <code>frontend/dist</code></td></tr>
+  <tr><td>Bootstrap</td><td>One-time setup so CDK can deploy to an account and region</td><td><code>CDKToolkit</code> stack</td></tr>
+  <tr><td>boto3</td><td>The AWS library for Python</td><td><code>boto3.resource("dynamodb")</code></td></tr>
+  <tr><td>BucketDeployment</td><td>CDK helper that copies files into a bucket on deploy</td><td>Uploads the UI and <code>config.json</code></td></tr>
+  <tr><td>CDK</td><td>Write infrastructure as TypeScript code</td><td><code>lib/talentmatch-stack.ts</code></td></tr>
+  <tr><td>CloudFormation</td><td>AWS service that creates resources from a template</td><td>Runs every <code>cdk deploy</code></td></tr>
+  <tr><td>CloudFront</td><td>CDN that serves files fast over HTTPS</td><td><code>d2kcn6pne6ts5i.cloudfront.net</code></td></tr>
+  <tr><td>CloudTrail</td><td>A record of every action in your AWS account</td><td>Shows who created the stack</td></tr>
+  <tr><td>CloudWatch Logs</td><td>Where Lambda's printed lines are stored</td><td><code>/talentmatch/dev/api</code></td></tr>
+  <tr><td>Cold start</td><td>Extra delay when Lambda starts a fresh container</td><td><code>Init Duration</code> in the REPORT line</td></tr>
+  <tr><td>Conditional write</td><td>"Only save if this is true"</td><td><code>attribute_not_exists(PK)</code></td></tr>
+  <tr><td>Construct</td><td>A CDK building block</td><td><code>new lambda.Function(...)</code></td></tr>
+  <tr><td>CORS</td><td>Browser rule for which sites may call your API</td><td><code>allowOrigins</code></td></tr>
+  <tr><td>Cost allocation tag</td><td>A label that groups costs in billing</td><td><code>project=talentmatch</code></td></tr>
+  <tr><td>Credential helper</td><td>Program that supplies git login details</td><td>macOS keychain, <code>gh auth git-credential</code></td></tr>
+  <tr><td>Drift</td><td>When real AWS no longer matches the stack</td><td>Deleting a CDK bucket by hand</td></tr>
+  <tr><td>DynamoDB</td><td>AWS's NoSQL key-value database</td><td>Our jobs table</td></tr>
+  <tr><td>Environment variable</td><td>A setting passed into a program from outside</td><td><code>TABLE_NAME</code>, <code>STAGE</code></td></tr>
+  <tr><td>GSI</td><td>A second copy of a table, sorted by other keys</td><td><code>GSI1</code> lists all jobs</td></tr>
+  <tr><td>Handler</td><td>The function Lambda calls</td><td><code>app.handler</code></td></tr>
+  <tr><td>IAM</td><td>AWS's system for who can do what</td><td>The Lambda's role</td></tr>
+  <tr><td>IAM role</td><td>A set of permissions something "wears"</td><td>Created for <code>apiFn</code> automatically</td></tr>
+  <tr><td>Idempotency</td><td>Doing it twice gives the same result as once</td><td>Sprint 2b's idempotency keys</td></tr>
+  <tr><td>Infrastructure as code</td><td>Resources written as code, not clicked</td><td>Everything in <code>lib/</code></td></tr>
+  <tr><td>Item / item collection</td><td>One row / all rows sharing a PK</td><td><code>JOB#1</code> + <code>META</code></td></tr>
+  <tr><td>Jest</td><td>Test runner for TypeScript</td><td><code>npm test</code></td></tr>
+  <tr><td>Lambda</td><td>Code AWS runs only when needed</td><td><code>TalentMatch-dev-ApiFunction...</code></td></tr>
+  <tr><td>Least privilege</td><td>Give only the permissions needed</td><td><code>grantReadWriteData</code> on one table</td></tr>
+  <tr><td>Log group</td><td>A folder of logs</td><td><code>/talentmatch/dev/api</code></td></tr>
+  <tr><td>moto</td><td>A fake AWS for Python tests</td><td><code>@mock_aws</code></td></tr>
+  <tr><td>OAC</td><td>Lets only CloudFront read a private bucket</td><td><code>withOriginAccessControl</code></td></tr>
+  <tr><td>On-demand billing</td><td>Pay per request, nothing when idle</td><td><code>Billing.onDemand()</code></td></tr>
+  <tr><td>Output (CfnOutput)</td><td>A value printed after deploy</td><td><code>ApiUrl</code>, <code>TableName</code></td></tr>
+  <tr><td>Pagination</td><td>Getting results one page at a time</td><td><code>?limit=1&amp;nextToken=...</code></td></tr>
+  <tr><td>Partition key (PK)</td><td>Picks which "folder" an item lives in</td><td><code>JOB#&lt;id&gt;</code></td></tr>
+  <tr><td>Query vs Scan</td><td>Read one folder vs read everything</td><td><code>list_jobs</code> uses Query</td></tr>
+  <tr><td>Region</td><td>A group of AWS data centres in one place</td><td><code>ap-south-1</code> (Mumbai)</td></tr>
+  <tr><td>Removal policy</td><td>What happens to a resource when its stack is deleted</td><td>DESTROY in dev, RETAIN in prod</td></tr>
+  <tr><td>Request ID</td><td>A unique ID for one request, used to trace it</td><td><code>context.aws_request_id</code></td></tr>
+  <tr><td>Route</td><td>Method + path on an API</td><td><code>GET /v1/jobs/{jobId}</code></td></tr>
+  <tr><td>S3</td><td>AWS's file storage</td><td>The web bucket</td></tr>
+  <tr><td>Single-table design</td><td>All entity types in one DynamoDB table</td><td>Jobs, candidates, applications</td></tr>
+  <tr><td>Sort key (SK)</td><td>Orders items inside one PK</td><td><code>META</code>, <code>APP#cand-a</code></td></tr>
+  <tr><td>Sparse index</td><td>A GSI that only holds items with its keys</td><td>No <code>GSI1PK</code> = not listed</td></tr>
+  <tr><td>SPA fallback</td><td>Serve <code>index.html</code> for unknown paths</td><td><code>/jobs/123</code> after refresh</td></tr>
+  <tr><td>Stack</td><td>A group of resources created and deleted together</td><td><code>TalentMatch-dev</code></td></tr>
+  <tr><td>Stack trace</td><td>The path of calls that led to an error</td><td>Read it bottom up</td></tr>
+  <tr><td>STS</td><td>AWS service that hands out temporary credentials</td><td><code>get-caller-identity</code></td></tr>
+  <tr><td>Synth</td><td>Turn CDK code into a CloudFormation template</td><td><code>npx cdk synth</code></td></tr>
+  <tr><td>Tag (git)</td><td>A bookmark on one commit</td><td><code>sprint-1</code></td></tr>
+  <tr><td>Token (CDK)</td><td>A placeholder filled in at deploy time</td><td><code>table.tableName</code></td></tr>
+  <tr><td>Unit test</td><td>A test of one small piece, on its own</td><td><code>tests/api/test_jobs.py</code></td></tr>
+  <tr><td>Virtual environment</td><td>A private Python package folder per project</td><td><code>.venv</code></td></tr>
+</table></div>
+</section>
+
+<div class="box explore"><span class="label">Explore more</span>
+<ul class="check">
+  <li><strong>CloudWatch Logs Insights:</strong> Console → CloudWatch → Logs Insights → pick <code>/talentmatch/dev/api</code> and run <code>fields @timestamp, @message | filter @message like /WARNING/ | sort @timestamp desc</code>. Then count errors by code with <code>parse @message '"code": "*"' as code | stats count() by code</code>. (Python's Lambda logger adds a <code>[LEVEL] time request-id</code> prefix, so we filter the text instead of a JSON field.)</li>
+  <li><strong>Lambda timing:</strong> in Logs Insights, <code>filter @type = "REPORT" | stats avg(@duration), max(@initDuration)</code> shows normal speed vs cold-start cost.</li>
+  <li><strong><code>npx cdk doctor</code>:</strong> prints your CDK version and the environment settings CDK sees.</li>
+  <li><strong>CloudFormation Events tab:</strong> after a deploy, read the events bottom up. That's the order resources were created.</li>
+  <li><strong>IAM policy simulator:</strong> Console → IAM → Roles → the ApiFunction role → "Simulate". Test <code>dynamodb:PutItem</code> on your table (allowed) and on <code>*</code> (denied).</li>
+  <li><strong><code>git log --oneline --graph --decorate</code>:</strong> see your commits and tags as a picture.</li>
+  <li><strong>Break a test on purpose:</strong> change one line, predict which test fails before running it, then check.</li>
+  <li><strong><code>aws cloudformation describe-stack-resources --stack-name TalentMatch-dev</code>:</strong> every resource and its real name.</li>
+</ul>
+</div>
+
+<!-- ================= Q&A ================= -->
+<section id="qa">
+<h2><span class="n">7.12</span>Check yourself</h2>
+<p>Try to answer in your head first, then click to reveal.</p>
+<div class="qa-list">
+  <details class="qa"><summary>Why do we have many unit tests but only a few live curl tests?</summary><div class="a">Unit tests run on your Mac in under a second, cost nothing and need no deploy. Live tests need a deploy (minutes) and real AWS. You want fast feedback for most checks, and a few live tests for what only real AWS can show, like permissions and CORS.</div></details>
+  <details class="qa"><summary>Which test layer would catch a missing <code>table.grantReadWriteData(apiFn)</code>?</summary><div class="a">Only the live layer. moto doesn't check IAM, so unit tests pass, and the CDK tests we wrote don't check the policy. The live <code>POST /v1/jobs</code> returns 500, with <code>AccessDeniedException</code> in the logs. You could also add a CDK test that checks the policy exists.</div></details>
+  <details class="qa"><summary>In a Python stack trace, which line do you read first, and which second?</summary><div class="a">First the very last line (error type plus reason). Second, the lowest line that points into your own code (for example <code>src/api/app.py, line 46</code>). The lines above that are the callers, for context.</div></details>
+  <details class="qa"><summary>Why did the health test say <code>404 != 200</code> when the route existed?</summary><div class="a"><code>health</code> returned a response dict instead of <code>(status, body)</code>. Unpacking it crashed with <code>ValueError</code>, and <code>except Exception</code> only logged it, then fell through to <code>return 404</code>. A crash was disguised as "not found". The fix was to return a pair, and make the crash branch return 500.</div></details>
+  <details class="qa"><summary>You curl a URL and get <code>{"message":"Not Found"}</code>, and there's no line in your Lambda logs. Where is the problem?</summary><div class="a">In API Gateway. No route matched that method and path, so API Gateway answered by itself without calling your Lambda. Check the routes in CDK (for example, there's no <code>DELETE</code> route).</div></details>
+  <details class="qa"><summary>Why did <code>git push</code> still fail after setting <code>user.name "ByteShah"</code>?</summary><div class="a"><code>user.name</code>/<code>user.email</code> only set the author written into commits. Login comes from the remote URL plus the saved credentials, which were <code>jash-yulara</code> in the keychain. Putting <code>ByteShah@</code> in the remote URL makes git ask for ByteShah's credentials.</div></details>
+  <details class="qa"><summary>What does <code>Start directory is not importable</code> usually mean?</summary><div class="a">The folder you passed to <code>-s</code> doesn't exist from your current directory, because of a wrong name (<code>test</code> vs <code>tests</code>) or the wrong <code>pwd</code>. Check with <code>pwd</code> and <code>ls</code>.</div></details>
+  <details class="qa"><summary>Why did only 2 of 6 Python tests run, with no error?</summary><div class="a">unittest only collects files named <code>test*.py</code> (so <code>text_app.py</code> was skipped) and methods inside a <code>TestCase</code> class (the job tests weren't indented). Neither mistake raises an error; they're silently skipped. If fewer tests run than you wrote, check names and indentation.</div></details>
+  <details class="qa"><summary>Which two things in your AWS account should you never delete, and why?</summary><div class="a">The <code>CDKToolkit</code> stack and its <code>cdk-hnb659fds-assets-...</code> bucket. Every <code>cdk deploy</code> uploads code and templates there first, so without them deploys fail until you run <code>cdk bootstrap</code> again. They cost fractions of a cent.</div></details>
+  <details class="qa"><summary>Why must you never delete a CDK-created bucket or table by hand in the console?</summary><div class="a">CloudFormation still thinks it owns that resource. The stack drifts from reality, and later deploys or destroys can fail. Always remove CDK resources with <code>cdk destroy</code> (or by removing them from the code and deploying).</div></details>
+  <details class="qa"><summary>You redeployed after destroying, and <code>npm run dev</code> on localhost shows "Failed to fetch". What's the most likely cause?</summary><div class="a">The API URL changed, but your local <code>frontend/public/config.json</code> still points to the old one. Copy the new <code>ApiUrl</code> output into it. (The deployed CloudFront site is fine, because CDK regenerates its <code>config.json</code>.)</div></details>
+  <details class="qa"><summary>Which services in our plan's "never create" list would charge even if nobody used them?</summary><div class="a">NAT Gateway (~$32/month), OpenSearch Serverless (~$175/month), Aurora/RDS ($45+/month), Kendra, VPC interface endpoints (~$7/month each) and Bedrock provisioned throughput. They charge per hour of existence, not per request.</div></details>
+</div>
+</section>
+
+<nav class="pager" aria-label="Previous and next chapter">
+  <a class="prev" href="06-building-the-jobs-api.html"><small>← Previous</small>6 · Building the jobs API</a>
+  <a class="next" href="index.html"><small>Next →</small>Back to the book home</a>
+</nav>
+</main>
+</body>
+</html>

@@ -1,0 +1,612 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lambda and the Health API</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+  <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah" d="M0,0 L10,5 L0,10 z"/></marker>
+  <marker id="arb" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah blue" d="M0,0 L10,5 L0,10 z"/></marker>
+  <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah red" d="M0,0 L10,5 L0,10 z"/></marker>
+  <marker id="arg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah green" d="M0,0 L10,5 L0,10 z"/></marker>
+</defs></svg>
+
+<nav class="topbar" aria-label="Chapters"><div class="in">
+  <a class="home" href="index.html">TalentMatch book</a>
+  <a href="00-plan-and-design.html">0 Plan</a>
+  <a href="01-aws-basics-and-account-setup.html">1 AWS</a>
+  <a href="02-infrastructure-as-code-with-cdk.html">2 CDK</a>
+  <a class="here" href="03-lambda-and-the-health-api.html">3 Lambda</a>
+  <a href="04-hosting-the-ui-s3-cloudfront.html">4 UI hosting</a>
+  <a href="05-dynamodb-explained.html">5 DynamoDB</a>
+  <a href="06-building-the-jobs-api.html">6 Jobs API</a>
+  <a href="07-testing-debugging-and-habits.html">7 Debugging</a>
+</div></nav>
+
+<main>
+<header class="hero">
+  <div class="num">03</div>
+  <div class="kicker">Chapter 3 · Sprint 1 · Backend half</div>
+  <h1>Lambda and the Health API</h1>
+  <p class="sub">How a few lines of Python became a live HTTPS endpoint, <code>GET /v1/health</code>, without us ever starting a server. We cover what runs your code, what calls it, and where its logs go.</p>
+  <div class="learn">
+    <h3>What you will learn</h3>
+    <ul>
+      <li>What "serverless" really means</li>
+      <li>Handler, event and context</li>
+      <li>Cold starts vs warm starts</li>
+      <li>Memory, timeout, arm64, env vars</li>
+      <li>The execution role CDK makes for you</li>
+      <li>CloudWatch log groups and streams</li>
+      <li>API Gateway routes and integrations</li>
+      <li>Reading a request end to end with curl</li>
+    </ul>
+  </div>
+  <nav class="toc" aria-label="In this chapter">
+    <a href="#s1">3.1 Serverless</a><a href="#s2">3.2 Handler</a><a href="#s3">3.3 Lifecycle</a><a href="#s4">3.4 Settings</a>
+    <a href="#s5">3.5 Logs</a><a href="#s6">3.6 API Gateway</a><a href="#s7">3.7 End to end</a><a href="#s8">3.8 Explore</a><a href="#qa">Check yourself</a>
+  </nav>
+</header>
+
+<!-- ============================== 3.1 ============================== -->
+<section id="s1">
+<h2><span class="n">3.1</span>What "serverless" means</h2>
+<p class="lead">Serverless means you hand AWS your code and it runs it only when someone needs it. You never rent, start or patch a machine, and you pay nothing while nobody is calling.</p>
+
+<div class="box simple"><span class="label">In simple words</span>
+  <p>A normal server is like <strong>owning a food truck</strong>: you pay for the truck, fuel and parking every day, even when no customers come. Serverless is like a <strong>kitchen that cooks only when an order arrives</strong>. Someone orders a pizza, a cook appears, makes it, and goes home. You pay per pizza, and zero pizzas means zero cost.</p>
+  <p>Tiny example: our health check was called maybe 50 times on test day. Lambda gives 1,000,000 free calls a month, so the cost was <strong>$0</strong>. A small always-on server would cost about $8–15 a month even if nobody called it.</p>
+</div>
+
+<figure>
+  <svg viewBox="0 0 760 250" role="img" aria-label="Comparison: a server runs all day and costs money while idle; Lambda runs only during requests">
+    <text class="gt" x="20" y="24">ALWAYS-ON SERVER</text>
+    <rect class="bx warn" x="20" y="36" width="720" height="34" rx="6"/>
+    <text class="m" x="32" y="58">running 24 h a day · you pay every hour · you patch the OS · you scale it yourself</text>
+    <text class="lb" x="20" y="92">00:00</text><text class="lb" x="370" y="92">12:00</text><text class="lb" x="700" y="92">24:00</text>
+
+    <text class="gt" x="20" y="134">LAMBDA (SERVERLESS)</text>
+    <line class="w dash" x1="20" y1="165" x2="740" y2="165"/>
+    <rect class="bx aws" x="90" y="150" width="18" height="30" rx="3"/>
+    <rect class="bx aws" x="240" y="150" width="12" height="30" rx="3"/>
+    <rect class="bx aws" x="256" y="150" width="12" height="30" rx="3"/>
+    <rect class="bx aws" x="430" y="150" width="14" height="30" rx="3"/>
+    <rect class="bx aws" x="610" y="150" width="20" height="30" rx="3"/>
+    <text class="lb" x="20" y="200">00:00</text><text class="lb" x="370" y="200">12:00</text><text class="lb" x="700" y="200">24:00</text>
+    <text class="s" x="20" y="232">Blue blocks = a request being handled (you pay only for these milliseconds). Dashed line = idle, costs $0.</text>
+  </svg>
+  <figcaption>Figure 3.1 · A server bills for every hour. Lambda bills only for the short moments your code is actually running.</figcaption>
+</figure>
+
+<div class="box tech"><span class="label">Technical view</span>
+  <p>AWS Lambda is a <strong>Function-as-a-Service</strong> platform. You upload a code package and say which function to call (the <em>handler</em>). AWS keeps a pool of tiny isolated micro-VMs (Firecracker). When an event arrives, it puts your code in one, calls the handler, and later throws the micro-VM away. Billing is per request ($0.20 per million) plus <strong>GB-seconds</strong> (memory × duration, rounded up to 1 ms).</p>
+</div>
+
+<h3>Technical terms</h3>
+<div class="tw"><table class="terms">
+  <tr><th>Term</th><th>Simple meaning</th><th>Example from our project</th></tr>
+  <tr><td>Serverless</td><td>AWS runs the machines; you only bring code</td><td>Our API has zero servers we manage</td></tr>
+  <tr><td>Lambda function</td><td>A piece of code AWS runs when an event happens</td><td><code>TalentMatch-dev-ApiFunction…</code></td></tr>
+  <tr><td>Invocation</td><td>One run of the function</td><td>One <code>curl $API/v1/health</code> = one invocation</td></tr>
+  <tr><td>GB-second</td><td>Memory size × seconds run, the unit you pay for</td><td>256 MB × 0.005 s = 0.00125 GB-s</td></tr>
+  <tr><td>Scale to zero</td><td>When nobody calls, nothing runs and nothing is billed</td><td>Overnight our API costs $0</td></tr>
+</table></div>
+</section>
+
+<!-- ============================== 3.2 ============================== -->
+<section id="s2">
+<h2><span class="n">3.2</span>Handler, event and context</h2>
+<p class="lead">Every Lambda is one function that receives two things, an <code>event</code> (what happened) and a <code>context</code> (facts about this run), and returns an answer.</p>
+
+<div class="box simple"><span class="label">In simple words</span>
+  <p>Think of a <strong>post office counter</strong>. The <strong>event</strong> is the letter you hand in: who it's from, what it asks. The <strong>context</strong> is the receipt slip the post office staples on: a tracking number and how much time is left before closing. The <strong>handler</strong> is the clerk who reads the letter and hands back a reply.</p>
+</div>
+
+<figure>
+  <svg viewBox="0 0 760 230" role="img" aria-label="Event and context go into app.handler which returns a response dictionary">
+    <rect class="bx data" x="20" y="20" width="230" height="110" rx="8"/>
+    <text class="t" x="34" y="42">event (a dict)</text>
+    <text class="m" x="34" y="64">routeKey: "GET /v1/health"</text>
+    <text class="m" x="34" y="82">headers: {…}</text>
+    <text class="m" x="34" y="100">body: null</text>
+    <text class="m" x="34" y="118">queryStringParameters</text>
+
+    <rect class="bx data" x="20" y="146" width="230" height="66" rx="8"/>
+    <text class="t" x="34" y="168">context (an object)</text>
+    <text class="m" x="34" y="188">aws_request_id: "8f1c…"</text>
+    <text class="m" x="34" y="204">get_remaining_time…()</text>
+
+    <path class="w blue" d="M250 75 H318" marker-end="url(#arb)"/>
+    <path class="w blue" d="M250 179 H290 V120 H318" marker-end="url(#arb)"/>
+
+    <rect class="bx code" x="322" y="70" width="170" height="70" rx="8"/>
+    <text class="t" x="336" y="96">app.handler</text>
+    <text class="s" x="336" y="114">file app.py,</text>
+    <text class="s" x="336" y="128">function handler</text>
+
+    <path class="w green" d="M492 105 H558" marker-end="url(#arg)"/>
+    <rect class="bx user" x="562" y="40" width="180" height="130" rx="8"/>
+    <text class="t" x="576" y="62">return value</text>
+    <text class="m" x="576" y="84">statusCode: 200</text>
+    <text class="m" x="576" y="102">headers:</text>
+    <text class="m" x="586" y="118">content-type: json</text>
+    <text class="m" x="576" y="136">body: '{"status":</text>
+    <text class="m" x="586" y="152">"ok", …}'</text>
+  </svg>
+  <figcaption>Figure 3.2 · API Gateway builds the event, Lambda adds the context, and your handler returns a dict that API Gateway turns back into an HTTP response.</figcaption>
+</figure>
+
+<div class="box tech"><span class="label">Technical view</span>
+  <p>The handler string <code>app.handler</code> means "import module <code>app</code> (the file <code>app.py</code>) and call its function <code>handler</code>". For HTTP API (payload format 2.0) the event carries <code>routeKey</code>, <code>rawPath</code>, <code>headers</code>, <code>queryStringParameters</code>, <code>pathParameters</code>, <code>body</code> and <code>isBase64Encoded</code>. The return value must be a dict with <code>statusCode</code>, optional <code>headers</code>, and <code>body</code> as a <strong>string</strong>, which is why we call <code>json.dumps</code>.</p>
+</div>
+
+<p>Here is the real code from our project. The handler reads <code>routeKey</code>, logs it with the request ID, and looks the route up in a dictionary:</p>
+<div class="file">src/api/app.py</div>
+<pre class="code"><span class="k">def</span> handler(event, context):
+<span class="hl">    route = event.get(<span class="s">"routeKey"</span>, <span class="s">""</span>)                 <span class="c"># e.g. "GET /v1/health"</span></span>
+    log(<span class="s">"INFO"</span>, <span class="s">"request"</span>, context, route=route)      <span class="c"># context gives us aws_request_id</span>
+    <span class="k">try</span>:
+        route_fn = ROUTES.get(route)                     <span class="c"># pick the Python function for this route</span>
+        ...
+        status, body = route_fn(event)
+        <span class="k">return</span> response(status, body)
+
+<span class="k">def</span> health(event):
+    <span class="k">return</span> 200, {<span class="s">"status"</span>: <span class="s">"ok"</span>, <span class="s">"stage"</span>: STAGE, <span class="s">"version"</span>: VERSION,
+                 <span class="s">"time"</span>: datetime.now(timezone.utc).isoformat()}
+
+<span class="k">def</span> response(status, body):
+    <span class="k">return</span> {<span class="s">"statusCode"</span>: status,
+            <span class="s">"headers"</span>: {<span class="s">"content-type"</span>: <span class="s">"application/json"</span>},
+            <span class="s">"body"</span>: json.dumps(body, default=json_default)}   <span class="c"># body must be a string</span></pre>
+
+<div class="box warn"><span class="label">Watch out</span>
+  <p>Route functions return a <strong>pair</strong> <code>(status, body)</code>; only <code>handler</code> builds the full response dict. In our build, <code>health</code> once returned <code>response(...)</code> instead of <code>200, {...}</code>. Unpacking a 3-key dict into two variables crashed, the crash was swallowed, and the test showed <code>404 != 200</code>. Chapter 7 tells the whole story.</p>
+</div>
+
+<h3>Technical terms</h3>
+<div class="tw"><table class="terms">
+  <tr><th>Term</th><th>Simple meaning</th><th>Example from our project</th></tr>
+  <tr><td>Handler</td><td>The function AWS calls</td><td><code>handler: 'app.handler'</code> in the stack</td></tr>
+  <tr><td>Event</td><td>The input: what happened</td><td><code>{"routeKey": "GET /v1/health", …}</code></td></tr>
+  <tr><td>Context</td><td>Facts about this run</td><td><code>context.aws_request_id</code> in every log line</td></tr>
+  <tr><td>Payload format 2.0</td><td>The shape of events an HTTP API sends</td><td>Has <code>routeKey</code>; REST APIs use format 1.0</td></tr>
+  <tr><td>Request ID</td><td>A unique tracking number per invocation</td><td><code>"request_id": "8f1c…"</code> in our logs</td></tr>
+</table></div>
+</section>
+
+<!-- ============================== 3.3 ============================== -->
+<section id="s3">
+<h2><span class="n">3.3</span>The Lambda lifecycle: cold and warm starts</h2>
+<p class="lead">The first request after a quiet period is slower, because AWS has to set up a fresh environment (a <strong>cold start</strong>). Later requests reuse it and are fast (<strong>warm starts</strong>).</p>
+
+<div class="box simple"><span class="label">In simple words</span>
+  <p>A cold start is like the <strong>first coffee of the morning</strong> at a café: someone has to switch on the machine, grind beans and warm the milk. That takes a minute. The second coffee is quick because the machine is already hot. If nobody orders for a long time, the machine gets switched off again, and the next customer waits for the warm-up.</p>
+</div>
+
+<figure>
+  <svg viewBox="0 0 760 300" role="img" aria-label="Timeline: request 1 has an init phase then invoke; requests 2 and 3 invoke directly; after a long idle the environment is removed and request 4 is cold again">
+    <line class="w" x1="20" y1="210" x2="740" y2="210" marker-end="url(#ar)"/>
+    <text class="lb" x="700" y="230">time</text>
+
+    <text class="gt" x="20" y="30">REQUEST 1 · COLD</text>
+    <rect class="bx warn" x="20" y="44" width="150" height="40" rx="6"/><text class="t" x="32" y="62">INIT</text><text class="s" x="32" y="77">~150–300 ms</text>
+    <rect class="bx aws" x="170" y="44" width="60" height="40" rx="6"/><text class="t" x="178" y="69">invoke</text>
+    <text class="s" x="20" y="102">download zip · start Python · run imports</text>
+
+    <text class="gt" x="262" y="30">REQ 2 · WARM</text>
+    <rect class="bx aws" x="262" y="44" width="60" height="40" rx="6"/><text class="t" x="270" y="69">invoke</text>
+    <text class="gt" x="382" y="30">REQ 3 · WARM</text>
+    <rect class="bx aws" x="382" y="44" width="60" height="40" rx="6"/><text class="t" x="390" y="69">invoke</text>
+    <text class="s" x="262" y="102">same environment reused, only a few ms</text>
+
+    <rect class="bx data" x="20" y="130" width="462" height="34" rx="6"/>
+    <text class="m" x="32" y="152">one execution environment (micro-VM), kept between requests</text>
+    <rect class="bx ghost" x="490" y="130" width="102" height="34" rx="6"/>
+    <text class="s" x="500" y="151">idle → removed</text>
+
+    <text class="gt" x="600" y="30">REQ 4 · COLD</text>
+    <rect class="bx warn" x="600" y="44" width="80" height="40" rx="6"/><text class="t" x="610" y="69">INIT</text>
+    <rect class="bx aws" x="680" y="44" width="60" height="40" rx="6"/><text class="t" x="686" y="69">invoke</text>
+    <rect class="bx data" x="600" y="130" width="140" height="34" rx="6"/>
+    <text class="m" x="612" y="152">new environment</text>
+
+    <text class="s" x="20" y="262">Code at the top of app.py (imports, logger setup, the cached table) runs in INIT once.</text>
+    <text class="s" x="20" y="280">Code inside handler() runs on every invoke.</text>
+  </svg>
+  <figcaption>Figure 3.3 · Only the first request in a new environment pays the INIT cost. That's why we create expensive things (like the DynamoDB connection) outside the handler.</figcaption>
+</figure>
+
+<div class="box tech"><span class="label">Technical view</span>
+  <p>The lifecycle has three phases. <strong>Init</strong>: download the code, start the runtime, run module-level code. <strong>Invoke</strong>: call the handler. <strong>Shutdown</strong>: after some idle minutes (not guaranteed), the environment is destroyed. Between invokes the environment is <em>frozen</em>, so global variables survive. Each concurrent request needs its own environment, so 10 simultaneous requests can mean 10 cold starts.</p>
+</div>
+
+<h3>Try it: see a cold start in the logs</h3>
+<ol class="steps">
+  <li><strong>Deploy, then call the API twice in a row.</strong> The first call after a deploy is always cold, because a deploy replaces the code.
+<pre class="term"><span class="p">$ </span>API=https://1ezo0amr36.execute-api.ap-south-1.amazonaws.com
+<span class="p">$ </span>curl -s $API/v1/health
+<span class="o">{"status": "ok", "stage": "dev", "version": "0.1.0", "time": "2026-10-07T04:12:09.512+00:00"}</span>
+<span class="p">$ </span>curl -s $API/v1/health</pre></li>
+  <li><strong>Read the REPORT lines.</strong> Lambda writes one after every invocation.
+<pre class="term"><span class="p">$ </span>aws logs tail /talentmatch/dev/api --since 5m | grep REPORT
+<span class="o">REPORT RequestId: 8f1c… Duration: 4.12 ms  Billed Duration: 5 ms  Memory Size: 256 MB  Max Memory Used: 41 MB  <span class="c">Init Duration: 187.40 ms</span>
+REPORT RequestId: 2b7a… Duration: 1.95 ms  Billed Duration: 2 ms  Memory Size: 256 MB  Max Memory Used: 41 MB</span>
+<span class="c"># The first line has "Init Duration" = cold start. The second doesn't = warm.</span></pre></li>
+</ol>
+<p class="muted">Your exact numbers will differ. What matters is that <code>Init Duration</code> appears only on the first line.</p>
+
+<h3>Technical terms</h3>
+<div class="tw"><table class="terms">
+  <tr><th>Term</th><th>Simple meaning</th><th>Example from our project</th></tr>
+  <tr><td>Execution environment</td><td>The little private computer your code runs in</td><td>Keeps <code>_table</code> cached between requests</td></tr>
+  <tr><td>Cold start</td><td>First run in a new environment, slower</td><td>The <code>Init Duration: 187 ms</code> line</td></tr>
+  <tr><td>Warm start</td><td>Reusing an existing environment, fast</td><td>Second curl, ~2 ms</td></tr>
+  <tr><td>Init phase</td><td>Running the top of your file once</td><td><code>logger = logging.getLogger()</code></td></tr>
+  <tr><td>Billed Duration</td><td>The time you pay for, rounded up to 1 ms</td><td><code>Billed Duration: 5 ms</code></td></tr>
+</table></div>
+</section>
+
+<!-- ============================== 3.4 ============================== -->
+<section id="s4">
+<h2><span class="n">3.4</span>Lambda settings, line by line</h2>
+<p class="lead">Six settings in our stack decide how the function runs: runtime, architecture, handler, code, memory and timeout. Two more control what it can see (environment variables) and what it may do (the execution role).</p>
+
+<div class="box simple"><span class="label">In simple words</span>
+  <p>Setting up a Lambda is like <strong>packing a lunch box for school</strong>. <em>Runtime</em> is the language the teacher speaks (Python). <em>Memory</em> is how big the lunch box is: bigger also means a faster helper. <em>Timeout</em> is when the lunch break ends. <em>Environment variables</em> are the note from mum ("you're in class dev"). The <em>role</em> is the permission slip that says which rooms you may enter.</p>
+</div>
+
+<div class="file">lib/talentmatch-stack.ts</div>
+<pre class="code"><span class="k">const</span> apiFn = <span class="k">new</span> lambda.Function(<span class="k">this</span>, <span class="s">'ApiFunction'</span>, {
+  runtime: lambda.Runtime.PYTHON_3_12,          <span class="c">// language + version AWS starts</span>
+  architecture: lambda.Architecture.ARM_64,     <span class="c">// Graviton CPU, ~20% cheaper than x86</span>
+  handler: <span class="s">'app.handler'</span>,                       <span class="c">// file app.py, function handler</span>
+<span class="hl">  code: lambda.Code.fromAsset(path.join(__dirname, <span class="s">'..'</span>, <span class="s">'src'</span>, <span class="s">'api'</span>)),  <span class="c">// zip the WHOLE folder</span></span>
+  memorySize: 256,                              <span class="c">// MB; CPU power grows with memory</span>
+  timeout: cdk.Duration.seconds(10),            <span class="c">// stop runaway code after 10 s</span>
+  logGroup: apiLogs,                            <span class="c">// where print/logger output goes (3.5)</span>
+  environment: { STAGE: props.stage, APP_VERSION: <span class="s">'0.1.0'</span>, TABLE_NAME: table.tableName },
+});</pre>
+
+<div class="tw"><table>
+  <tr><th>Setting</th><th>Our value</th><th>Why this value</th><th>Default</th></tr>
+  <tr><td><code>runtime</code></td><td>Python 3.12</td><td>Matches ADR-003 and your Mac's Python</td><td>none (required)</td></tr>
+  <tr><td><code>architecture</code></td><td>ARM_64</td><td>Cheaper per GB-second; pure Python runs the same</td><td>X86_64</td></tr>
+  <tr><td><code>memorySize</code></td><td>256 MB</td><td>More memory also gives more CPU, so faster JSON and boto3 setup</td><td>128 MB</td></tr>
+  <tr><td><code>timeout</code></td><td>10 s</td><td>API Gateway gives up at 30 s anyway; failing fast is kinder</td><td>3 s</td></tr>
+  <tr><td><code>environment</code></td><td>STAGE, APP_VERSION, TABLE_NAME</td><td>Same code knows "am I dev or prod?" and which table to use</td><td>none</td></tr>
+</table></div>
+
+<div class="box story"><span class="label">Real story from our build</span>
+  <p><strong>"Does <code>fromAsset</code> make one Lambda per file?"</strong> No. <code>fromAsset('src/api')</code> just zips the whole folder: <code>app.py</code>, <code>jobs.py</code> and <code>errors.py</code> all go into the same zip. The <code>new lambda.Function(...)</code> line is what creates a Lambda, so one <code>new</code> means one Lambda. That's why <code>app.py</code> can simply <code>import jobs</code>.</p>
+</div>
+
+<figure>
+  <svg viewBox="0 0 760 210" role="img" aria-label="Three Python files in src/api are zipped into one asset which becomes one Lambda function">
+    <rect class="bx data" x="20" y="30" width="150" height="34" rx="6"/><text class="m" x="34" y="52">src/api/app.py</text>
+    <rect class="bx data" x="20" y="78" width="150" height="34" rx="6"/><text class="m" x="34" y="100">src/api/jobs.py</text>
+    <rect class="bx data" x="20" y="126" width="150" height="34" rx="6"/><text class="m" x="34" y="148">src/api/errors.py</text>
+    <path class="w" d="M170 47 H230 V95" /><path class="w" d="M170 143 H230 V95"/><path class="w" d="M170 95 H268" marker-end="url(#ar)"/>
+    <rect class="bx warn" x="272" y="66" width="160" height="58" rx="8"/>
+    <text class="t" x="286" y="90">one zip (asset)</text><text class="s" x="286" y="108">fromAsset('src/api')</text>
+    <path class="w blue" d="M432 95 H508" marker-end="url(#arb)"/>
+    <text class="lb" x="440" y="84">cdk deploy</text>
+    <rect class="bx code" x="512" y="56" width="228" height="78" rx="8"/>
+    <text class="t" x="526" y="82">ONE Lambda function</text>
+    <text class="s" x="526" y="100">handler: app.handler</text>
+    <text class="s" x="526" y="116">app.py does "import jobs"</text>
+    <text class="s" x="20" y="194">Want two Lambdas? Write new lambda.Function(...) twice, each with its own folder (we will for the pipeline).</text>
+  </svg>
+  <figcaption>Figure 3.4 · The folder becomes one zip, and the zip becomes one function. The number of files doesn't matter.</figcaption>
+</figure>
+
+<h3>The execution role: CDK makes it for you</h3>
+<p>A Lambda can do <strong>nothing</strong> in AWS unless its <strong>execution role</strong> allows it. When you write <code>new lambda.Function</code>, CDK quietly creates an IAM role (<code>ApiFunction/ServiceRole</code>) that only allows writing logs. Later, <code>table.grantReadWriteData(apiFn)</code> adds DynamoDB permissions to that same role (Chapter 6).</p>
+
+<div class="box tech"><span class="label">Technical view</span>
+  <p>The role has a <em>trust policy</em> saying "the service <code>lambda.amazonaws.com</code> may assume me", plus the managed policy <code>AWSLambdaBasicExecutionRole</code> (CloudWatch Logs). Each invocation gets temporary credentials for this role, and boto3 picks them up automatically. That's why our Python code never contains access keys.</p>
+</div>
+
+<h3>Technical terms</h3>
+<div class="tw"><table class="terms">
+  <tr><th>Term</th><th>Simple meaning</th><th>Example from our project</th></tr>
+  <tr><td>Runtime</td><td>The language engine AWS starts</td><td><code>PYTHON_3_12</code></td></tr>
+  <tr><td>arm64 / Graviton</td><td>AWS's own cheaper CPU chips</td><td><code>Architecture.ARM_64</code></td></tr>
+  <tr><td>Timeout</td><td>Maximum time one run may take</td><td>10 seconds</td></tr>
+  <tr><td>Environment variable</td><td>A named setting your code reads</td><td><code>os.environ.get("STAGE")</code> → <code>"dev"</code></td></tr>
+  <tr><td>Asset</td><td>A local file or folder CDK uploads for you</td><td>The zip of <code>src/api</code> in the bootstrap bucket</td></tr>
+  <tr><td>Execution role</td><td>The permission slip the function carries</td><td><code>ApiFunctionServiceRole…</code> in IAM</td></tr>
+</table></div>
+</section>
+
+<!-- ============================== 3.5 ============================== -->
+<section id="s5">
+<h2><span class="n">3.5</span>CloudWatch Logs: where your prints go</h2>
+<p class="lead">Everything your Lambda logs lands in a <strong>log group</strong>, split into <strong>log streams</strong> (roughly one per execution environment). We gave ours a fixed name, <code>/talentmatch/dev/api</code>, and a 7-day retention.</p>
+
+<div class="box simple"><span class="label">In simple words</span>
+  <p>A log group is a <strong>diary book</strong> for one app. Each log stream is <strong>one chapter</strong> written by one cook in the kitchen (one execution environment). Every line has a time and a <strong>request ID</strong>, like an order number, so you can find exactly what happened to one customer's order.</p>
+</div>
+
+<figure>
+  <svg viewBox="0 0 760 250" role="img" aria-label="Log group contains log streams; each stream contains log events like START, our JSON line, END and REPORT">
+    <rect class="bx aws" x="20" y="20" width="240" height="60" rx="8"/>
+    <text class="t" x="34" y="44">Log group</text>
+    <text class="m" x="34" y="64">/talentmatch/dev/api</text>
+    <text class="s" x="34" y="100">retention: 7 days</text>
+    <path class="w" d="M140 80 V130 H290" marker-end="url(#ar)"/>
+    <path class="w" d="M140 130 V200 H290" marker-end="url(#ar)"/>
+    <rect class="bx data" x="290" y="110" width="200" height="40" rx="6"/>
+    <text class="t" x="302" y="128">stream 1</text><text class="m" x="302" y="143">2026/10/07/[$LATEST]a1…</text>
+    <rect class="bx data" x="290" y="180" width="200" height="40" rx="6"/>
+    <text class="t" x="302" y="198">stream 2</text><text class="m" x="302" y="213">2026/10/07/[$LATEST]c9…</text>
+    <path class="w" d="M490 130 H526" marker-end="url(#ar)"/>
+    <rect class="bx" x="530" y="20" width="218" height="216" rx="8"/>
+    <text class="t" x="544" y="42">Log events</text>
+    <text class="m" x="544" y="66">START RequestId: 8f1c…</text>
+    <text class="m" x="544" y="88">{"level": "INFO",</text>
+    <text class="m" x="552" y="104">"message": "request",</text>
+    <text class="m" x="552" y="120">"request_id": "8f1c…",</text>
+    <text class="m" x="552" y="136">"route": "GET /v1/health"}</text>
+    <text class="m" x="544" y="160">END RequestId: 8f1c…</text>
+    <text class="m" x="544" y="182">REPORT RequestId: 8f1c…</text>
+    <text class="m" x="552" y="198">Duration: 4.12 ms …</text>
+    <text class="s" x="544" y="224">Lambda writes START/END/REPORT</text>
+  </svg>
+  <figcaption>Figure 3.5 · One group holds many streams, and each stream holds events. The JSON line in the middle is the one <em>we</em> write. Lambda writes START, END and REPORT itself.</figcaption>
+</figure>
+
+<div class="file">src/api/app.py</div>
+<pre class="code"><span class="k">def</span> log(level, message, context, **fields):
+    entry = {<span class="s">"level"</span>: level, <span class="s">"message"</span>: message, <span class="s">"request_id"</span>: context.aws_request_id, **fields}
+    logger.log(getattr(logging, level), json.dumps(entry))   <span class="c"># one JSON object per line = "structured log"</span></pre>
+<p>Why JSON and not plain text? Because CloudWatch <strong>Logs Insights</strong> can then filter on fields, like "show me every WARNING with code NOT_FOUND". Plain text can only be searched as text.</p>
+
+<div class="box story"><span class="label">Real story from our build</span>
+  <p>We ran <code>aws logs tail /aws/lambda/TalentMatch-dev-ApiFunctionCE271BD4-BOKH6CBsHL7G --follow</code> and got <code>ResourceNotFoundException: The specified log group does not exist</code>. The command was fine. The <strong>name</strong> was wrong. We had created our own <code>LogGroup</code> (for 7-day retention) <em>without</em> a name, so CloudFormation invented one like <code>TalentMatch-dev-ApiLogs3D05D88B-AbC123</code>, and the Lambda was writing there, not to <code>/aws/lambda/…</code>.</p>
+  <p><strong>Fix:</strong> give it a predictable name and print it as an output.</p>
+<pre class="code"><span class="k">const</span> apiLogs = <span class="k">new</span> logs.LogGroup(<span class="k">this</span>, <span class="s">'ApiLogs'</span>, {
+<span class="hl">  logGroupName: <span class="s">`/talentmatch/${props.stage}/api`</span>,   <span class="c">// dev and prod never clash</span></span>
+  retention: logs.RetentionDays.ONE_WEEK,
+  removalPolicy: cdk.RemovalPolicy.DESTROY,
+});
+<span class="k">new</span> cdk.CfnOutput(<span class="k">this</span>, <span class="s">'ApiLogGroup'</span>, { value: apiLogs.logGroupName });</pre>
+</div>
+
+<div class="box warn"><span class="label">Watch out</span>
+  <p><code>aws logs tail</code> only shows events that <strong>already exist</strong>. Right after a deploy with no requests, it's empty, which doesn't mean it's broken. Run <code>--follow</code> in one terminal tab and <code>curl</code> in another.</p>
+</div>
+
+<h3>Try it</h3>
+<ol class="steps">
+  <li><strong>Find the log group from the stack</strong>, so you never have to guess.
+<pre class="term"><span class="p">$ </span>aws cloudformation describe-stacks --stack-name TalentMatch-dev \
+    --query "Stacks[0].Outputs[?OutputKey=='ApiLogGroup'].OutputValue" --output text
+<span class="o">/talentmatch/dev/api</span></pre></li>
+  <li><strong>Follow it live</strong> (tab 1), then make requests (tab 2).
+<pre class="term"><span class="p">$ </span>aws logs tail /talentmatch/dev/api --follow
+<span class="o">2026-10-07T04:12:09 {"level": "INFO", "message": "request", "request_id": "8f1c…", "route": "GET /v1/health"}</span></pre></li>
+  <li><strong>Check retention</strong> is really 7 days.
+<pre class="term"><span class="p">$ </span>aws logs describe-log-groups --log-group-name-prefix /talentmatch \
+    --query 'logGroups[].[logGroupName,retentionInDays]' --output text
+<span class="o">/talentmatch/dev/api    7</span></pre></li>
+</ol>
+
+<h3>Technical terms</h3>
+<div class="tw"><table class="terms">
+  <tr><th>Term</th><th>Simple meaning</th><th>Example from our project</th></tr>
+  <tr><td>CloudWatch Logs</td><td>AWS's storage for log lines</td><td>All our Lambda output</td></tr>
+  <tr><td>Log group</td><td>The diary for one app</td><td><code>/talentmatch/dev/api</code></td></tr>
+  <tr><td>Log stream</td><td>One chapter, from one environment</td><td><code>2026/10/07/[$LATEST]a1…</code></td></tr>
+  <tr><td>Retention</td><td>How long lines are kept before auto-delete</td><td><code>RetentionDays.ONE_WEEK</code></td></tr>
+  <tr><td>Structured log</td><td>A log line written as JSON fields</td><td><code>{"level": "INFO", "route": …}</code></td></tr>
+  <tr><td>Logs Insights</td><td>A query tool for searching logs by field</td><td>Count requests per route (3.8)</td></tr>
+</table></div>
+</section>
+
+<!-- ============================== 3.6 ============================== -->
+<section id="s6">
+<h2><span class="n">3.6</span>API Gateway: the front door</h2>
+<p class="lead">API Gateway gives our Lambda a public HTTPS address. It matches each request to a <strong>route</strong> and passes it through an <strong>integration</strong> to the function. We use the cheaper <strong>HTTP API</strong> type.</p>
+
+<div class="box simple"><span class="label">In simple words</span>
+  <p>API Gateway is the <strong>receptionist</strong> of a building. You walk in and say "GET /v1/health". The receptionist checks the list of allowed requests (the routes). If yours is on the list, they phone the right office (the Lambda). If it isn't, they say "Not Found" themselves and never disturb the office.</p>
+</div>
+
+<figure>
+  <svg viewBox="0 0 760 290" role="img" aria-label="Four routes all go through one integration to one Lambda, where the ROUTES dictionary picks the Python function">
+    <text class="gt" x="20" y="22">ROUTES (API GATEWAY)</text>
+    <rect class="bx aws" x="20" y="34" width="200" height="34" rx="6"/><text class="m" x="32" y="56">GET /v1/health</text>
+    <rect class="bx aws" x="20" y="80" width="200" height="34" rx="6"/><text class="m" x="32" y="102">GET /v1/jobs</text>
+    <rect class="bx aws" x="20" y="126" width="200" height="34" rx="6"/><text class="m" x="32" y="148">POST /v1/jobs</text>
+    <rect class="bx aws" x="20" y="172" width="200" height="34" rx="6"/><text class="m" x="32" y="194">GET /v1/jobs/{jobId}</text>
+    <path class="w" d="M220 51 H262 V120"/><path class="w" d="M220 97 H262"/><path class="w" d="M220 143 H262"/><path class="w" d="M220 189 H262 V120"/>
+    <path class="w blue" d="M262 120 H300" marker-end="url(#arb)"/>
+    <rect class="bx warn" x="304" y="92" width="150" height="56" rx="8"/>
+    <text class="t" x="318" y="116">integration</text><text class="s" x="318" y="134">ApiIntegration</text>
+    <path class="w blue" d="M454 120 H490" marker-end="url(#arb)"/>
+    <rect class="bx code" x="494" y="34" width="250" height="172" rx="8"/>
+    <text class="t" x="508" y="58">ONE Lambda · app.handler</text>
+    <text class="m" x="508" y="84">ROUTES = {</text>
+    <text class="m" x="516" y="104">"GET /v1/health": health,</text>
+    <text class="m" x="516" y="122">"GET /v1/jobs": list_jobs,</text>
+    <text class="m" x="516" y="140">"POST /v1/jobs": create_job,</text>
+    <text class="m" x="516" y="158">"GET …/{jobId}": get_job,</text>
+    <text class="m" x="508" y="176">}</text>
+    <rect class="bx bad" x="20" y="232" width="200" height="34" rx="6"/><text class="m" x="32" y="254">DELETE /v1/jobs/abc</text>
+    <path class="w red" d="M220 249 H300" marker-end="url(#arr)"/>
+    <text class="s" x="306" y="246">no matching route → API Gateway answers</text>
+    <text class="s" x="306" y="262">{"message":"Not Found"} itself; Lambda never runs</text>
+  </svg>
+  <figcaption>Figure 3.6 · Many routes, one integration, one Lambda. The <code>routeKey</code> in the event tells the Lambda which route was hit.</figcaption>
+</figure>
+
+<div class="file">lib/talentmatch-stack.ts</div>
+<pre class="code"><span class="k">const</span> api = <span class="k">new</span> apigw.HttpApi(<span class="k">this</span>, <span class="s">'HttpApi'</span>, { apiName: <span class="s">`talentmatch-${props.stage}`</span>, corsPreflight: {…} });
+<span class="hl"><span class="k">const</span> integration = <span class="k">new</span> HttpLambdaIntegration(<span class="s">'ApiIntegration'</span>, apiFn);   <span class="c">// made once…</span></span>
+api.addRoutes({ path: <span class="s">'/v1/health'</span>,       methods: [apigw.HttpMethod.GET], integration });   <span class="c">// …shared by all</span>
+api.addRoutes({ path: <span class="s">'/v1/jobs'</span>,         methods: [apigw.HttpMethod.GET, apigw.HttpMethod.POST], integration });
+api.addRoutes({ path: <span class="s">'/v1/jobs/{jobId}'</span>, methods: [apigw.HttpMethod.GET], integration });</pre>
+
+<p>Each <code>addRoutes</code> quietly creates three CloudFormation resources. You saw them in <code>cdk diff</code>:</p>
+<div class="tw"><table>
+  <tr><th>Resource</th><th>What it is</th><th>What breaks without it</th></tr>
+  <tr><td><code>AWS::ApiGatewayV2::Route</code></td><td>The entry "GET /v1/health" on the receptionist's list</td><td>404 Not Found</td></tr>
+  <tr><td><code>AWS::ApiGatewayV2::Integration</code></td><td>The phone line to the Lambda</td><td>The route has nowhere to send the request</td></tr>
+  <tr><td><code>AWS::Lambda::Permission</code></td><td>The Lambda saying "API Gateway may call me"</td><td><strong>500 error</strong>, a classic mistake in hand-written CloudFormation</td></tr>
+</table></div>
+<p>The API also gets a <strong><code>$default</code> stage</strong> with auto-deploy. That's why our URL has no <code>/prod</code> or <code>/dev</code> at the end. We separate environments with whole stacks instead.</p>
+
+<h3>HTTP API vs REST API</h3>
+<div class="tw"><table>
+  <tr><th></th><th>HTTP API (we use this)</th><th>REST API (older)</th></tr>
+  <tr><td>Price</td><td>~$1.00–1.11 per million requests</td><td>~$3.50 per million requests</td></tr>
+  <tr><td>Speed</td><td>Lower added latency</td><td>A bit slower</td></tr>
+  <tr><td>JWT login check (Sprint 3)</td><td>Built in</td><td>Needs a custom authorizer or Cognito authorizer</td></tr>
+  <tr><td>Extras</td><td>CORS, auto-deploy stage</td><td>API keys, usage plans, request validation, WAF, caching</td></tr>
+  <tr><td>Event format</td><td>2.0 (has <code>routeKey</code>)</td><td>1.0 (has <code>httpMethod</code> + <code>resource</code>)</td></tr>
+</table></div>
+
+<div class="box story"><span class="label">Real story from our build</span>
+  <p><code>curl -i -X POST $API/v1/health</code> returned <code>404 {"message":"Not Found"}</code>, and our log tail showed <strong>nothing</strong>. That's the clue: the message isn't in our error format (<code>{"error": {"code": …}}</code>), so our code never ran. Only <code>GET</code> was registered for <code>/v1/health</code>, so API Gateway rejected the request at the door.</p>
+</div>
+
+<h3>Technical terms</h3>
+<div class="tw"><table class="terms">
+  <tr><th>Term</th><th>Simple meaning</th><th>Example from our project</th></tr>
+  <tr><td>API Gateway</td><td>AWS's managed front door for APIs</td><td><code>talentmatch-dev</code> HTTP API</td></tr>
+  <tr><td>Route</td><td>Method + path that is allowed</td><td><code>GET /v1/health</code></td></tr>
+  <tr><td>routeKey</td><td>The route's name inside the event</td><td><code>"GET /v1/jobs/{jobId}"</code> (template, not the real ID)</td></tr>
+  <tr><td>Path parameter</td><td>A variable piece of the path</td><td><code>{jobId}</code> → <code>event["pathParameters"]["jobId"]</code></td></tr>
+  <tr><td>Integration</td><td>Where a route sends requests</td><td><code>HttpLambdaIntegration('ApiIntegration', apiFn)</code></td></tr>
+  <tr><td>Lambda permission</td><td>Lets API Gateway invoke the function</td><td>Auto-created by CDK</td></tr>
+  <tr><td>Stage</td><td>A deployed version of the API</td><td><code>$default</code>, so no suffix in the URL</td></tr>
+  <tr><td>/v1</td><td>Version prefix so we can change the API safely later</td><td>All our routes start with it</td></tr>
+</table></div>
+</section>
+
+<!-- ============================== 3.7 ============================== -->
+<section id="s7">
+<h2><span class="n">3.7</span>One request, end to end</h2>
+<p class="lead">When you run <code>curl $API/v1/health</code>, about seven things happen in roughly 50 ms. Knowing the order helps you debug: each step has its own error message.</p>
+
+<figure>
+  <svg viewBox="0 0 760 400" role="img" aria-label="Sequence diagram: curl sends GET to API Gateway, which matches the route and invokes Lambda; Lambda writes a log line to CloudWatch and returns a response; API Gateway returns 200 to curl">
+    <rect class="bx user" x="20" y="14" width="130" height="40" rx="6"/><text class="t" x="34" y="39">curl (you)</text>
+    <rect class="bx aws" x="215" y="14" width="140" height="40" rx="6"/><text class="t" x="228" y="39">API Gateway</text>
+    <rect class="bx code" x="420" y="14" width="140" height="40" rx="6"/><text class="t" x="434" y="39">Lambda</text>
+    <rect class="bx data" x="610" y="14" width="135" height="40" rx="6"/><text class="t" x="622" y="39">CloudWatch</text>
+    <line class="w dash" x1="85" y1="54" x2="85" y2="350"/>
+    <line class="w dash" x1="285" y1="54" x2="285" y2="350"/>
+    <line class="w dash" x1="490" y1="54" x2="490" y2="350"/>
+    <line class="w dash" x1="677" y1="54" x2="677" y2="350"/>
+
+    <path class="w blue" d="M85 84 H280" marker-end="url(#arb)"/><text class="lb" x="94" y="77">1 GET /v1/health (HTTPS)</text>
+    <rect class="bx aws" x="292" y="98" width="190" height="26" rx="4"/><text class="s" x="300" y="115">2 match route "GET /v1/health"</text>
+    <path class="w blue" d="M285 150 H485" marker-end="url(#arb)"/><text class="lb" x="294" y="143">3 invoke(event)</text>
+    <rect class="bx warn" x="497" y="162" width="104" height="26" rx="4"/><text class="s" x="504" y="179">4 init if cold</text>
+    <path class="w" d="M490 212 H672" marker-end="url(#ar)"/><text class="lb" x="498" y="205">5 log JSON line</text>
+    <rect class="bx code" x="497" y="226" width="104" height="26" rx="4"/><text class="s" x="504" y="243">6 health() runs</text>
+    <path class="w green" d="M490 278 H290" marker-end="url(#arg)"/><text class="lb" x="300" y="271">7 {statusCode: 200, …}</text>
+    <path class="w" d="M490 304 H672" marker-end="url(#ar)"/><text class="lb" x="498" y="297">REPORT line</text>
+    <path class="w green" d="M285 336 H90" marker-end="url(#arg)"/><text class="lb" x="96" y="329">8 HTTP/2 200 + JSON body</text>
+    <text class="s" x="20" y="382">If step 2 fails → API Gateway's own 404. If step 6 crashes → our 500 + an ERROR line in step 5's group.</text>
+  </svg>
+  <figcaption>Figure 3.7 · The full journey of one request. Time runs down the page.</figcaption>
+</figure>
+
+<h3>curl basics</h3>
+<div class="box simple"><span class="label">In simple words</span>
+  <p><code>curl</code> is a <strong>browser without a screen</strong>. It sends exactly the request you describe and prints the raw answer, with no JavaScript and no CORS rules. That makes it the honest witness when you're debugging.</p>
+</div>
+<div class="tw"><table>
+  <tr><th>Flag</th><th>Means</th><th>Example</th></tr>
+  <tr><td><code>-s</code></td><td>Silent: hide the progress bar</td><td><code>curl -s $API/v1/health</code></td></tr>
+  <tr><td><code>-i</code></td><td>Include the status line and headers in the output</td><td>Shows <code>HTTP/2 404</code></td></tr>
+  <tr><td><code>-X</code></td><td>Choose the method</td><td><code>-X POST</code></td></tr>
+  <tr><td><code>-H</code></td><td>Add a header</td><td><code>-H 'content-type: application/json'</code></td></tr>
+  <tr><td><code>-d</code></td><td>Send a body (data)</td><td><code>-d '{"title":"Odoo Developer"}'</code></td></tr>
+</table></div>
+
+<h3>Try it: the full Sprint 1 test set</h3>
+<ol class="steps">
+  <li><strong>Save the URL once</strong> in this terminal tab.
+<pre class="term"><span class="p">$ </span>API=https://1ezo0amr36.execute-api.ap-south-1.amazonaws.com</pre></li>
+  <li><strong>The happy path, with headers</strong>.
+<pre class="term"><span class="p">$ </span>curl -s -i $API/v1/health
+<span class="o">HTTP/2 200
+content-type: application/json
+apigw-requestid: Zx4…=
+
+{"status": "ok", "stage": "dev", "version": "0.1.0", "time": "2026-10-07T04:12:09.512+00:00"}</span></pre></li>
+  <li><strong>A route our code doesn't know</strong>. API Gateway answers this one, not us.
+<pre class="term"><span class="p">$ </span>curl -s -i -X POST $API/v1/health
+<span class="o">HTTP/2 404
+{"message":"Not Found"}</span>
+<span class="c"># Check the log tail: no new line. The Lambda never ran.</span></pre></li>
+  <li><strong>Find the Lambda's real name</strong> from the outputs and look at its settings.
+<pre class="term"><span class="p">$ </span>aws lambda get-function-configuration --function-name TalentMatch-dev-ApiFunctionCE271BD4-KWfgExCKxT3a \
+    --query '{runtime:Runtime,arch:Architectures,mem:MemorySize,timeout:Timeout,env:Environment.Variables}'
+<span class="o">{"runtime": "python3.12", "arch": ["arm64"], "mem": 256, "timeout": 10,
+ "env": {"STAGE": "dev", "APP_VERSION": "0.1.0", "TABLE_NAME": "TalentMatch-dev-TableCD117FA1-…"}}</span></pre></li>
+</ol>
+
+<div class="box danger"><span class="label">Costs money</span>
+  <p>At our scale, nothing here costs money: Lambda's free tier is 1M requests and 400,000 GB-seconds per month, and HTTP API is about $1 per <em>million</em> requests. The API has <strong>no login until Sprint 3</strong>, though. Anyone who finds the URL can call it, so destroy the dev stack when you stop for the day. Your $15 budget alert is the safety net.</p>
+</div>
+</section>
+
+<!-- ============================== 3.8 ============================== -->
+<section id="s8">
+<h2><span class="n">3.8</span>Explore more</h2>
+<p class="lead">Things we haven't looked at yet. Each takes 2–5 minutes and teaches you something real.</p>
+<div class="box explore"><span class="label">Explore more</span>
+  <ul class="check">
+    <li><strong>Lambda console → your function → Monitor tab.</strong> See the Invocations, Duration and Error count graphs that CloudWatch draws for free.</li>
+    <li><strong>Logs Insights</strong> (CloudWatch → Logs Insights → choose <code>/talentmatch/dev/api</code>). Count requests per route:
+<pre class="term">fields route
+| filter level = "INFO"
+| stats count() as requests by route
+| sort requests desc</pre></li>
+    <li><strong>Find every cold start</strong> in Logs Insights:
+<pre class="term">filter @type = "REPORT" and ispresent(@initDuration)
+| stats count() as coldStarts, avg(@initDuration) as avgInitMs</pre></li>
+    <li><strong>Test from the console</strong>: Lambda → Test → create an event <code>{"routeKey": "GET /v1/health"}</code>. Your handler runs without API Gateway at all, which proves the event is just a dict.</li>
+    <li><strong>Change memory to 128 MB</strong> in the stack, deploy, and compare <code>Duration</code> and <code>Init Duration</code> in REPORT lines. Then set it back. Less memory also means less CPU.</li>
+    <li><strong>Look at the role</strong>: IAM → Roles → search <code>ApiFunctionServiceRole</code>. Read the trust policy ("Trust relationships") and the attached policies.</li>
+    <li><strong>See the asset zip</strong>: <code>ls cdk.out/asset.*</code> after <code>npx cdk synth</code>. One folder contains your three <code>.py</code> files, exactly what Lambda receives.</li>
+    <li><strong>API Gateway console → your API → Routes</strong>: click a route and see its integration. Then open <strong>Stages → $default</strong> and look at the default throttling limits.</li>
+  </ul>
+</div>
+</section>
+
+<!-- ============================== Q&A ============================== -->
+<section id="qa">
+<h2><span class="n">3.9</span>Check yourself</h2>
+<p>Try to answer in your head first, then click to reveal.</p>
+<div class="qa-list">
+  <details class="qa"><summary>What does the handler string <code>app.handler</code> mean?</summary><div class="a">Import the module <code>app</code> (the file <code>app.py</code> inside the zip) and call its function named <code>handler</code>. Rename the Python function, and you must change this string in the stack too.</div></details>
+  <details class="qa"><summary>What happens during a cold start, and how do you see one?</summary><div class="a">AWS creates a new execution environment: it downloads your zip, starts Python and runs the top-level code of <code>app.py</code> (imports, logger setup). Only then does it call the handler. You see it as <code>Init Duration: … ms</code> on the REPORT log line. Warm invocations don't have that field.</div></details>
+  <details class="qa"><summary>Why do we create the DynamoDB connection outside the handler (cached in <code>_table</code>)?</summary><div class="a">Code outside the handler runs once per environment, during init. Code inside runs on every request. Creating the connection once and reusing it across warm invocations saves time and money on every request after the first.</div></details>
+  <details class="qa"><summary>Our <code>src/api</code> folder has three Python files. How many Lambdas does <code>fromAsset('src/api')</code> create?</summary><div class="a">Zero. <code>fromAsset</code> only says what code to zip and upload. The <code>new lambda.Function(...)</code> call creates the Lambda, so one call means one function containing all three files. That's why <code>app.py</code> can <code>import jobs</code>.</div></details>
+  <details class="qa"><summary>Why did <code>aws logs tail /aws/lambda/TalentMatch-dev-ApiFunction…</code> fail with "log group does not exist"?</summary><div class="a">We passed our own <code>LogGroup</code> to the Lambda (to set 7-day retention) without naming it, so CloudFormation generated a name like <code>TalentMatch-dev-ApiLogs3D05D88B-…</code>. The Lambda wrote there, not to the default <code>/aws/lambda/&lt;name&gt;</code>. We fixed it with <code>logGroupName: `/talentmatch/${props.stage}/api`</code> and an output.</div></details>
+  <details class="qa"><summary>Why does the log group name include <code>${props.stage}</code>?</summary><div class="a">Log group names must be unique in a region. Dev and prod live in the same account and region, so a fixed name like <code>/talentmatch/api</code> would make the second stack's deploy fail. With the stage in it you get <code>/talentmatch/dev/api</code> and <code>/talentmatch/prod/api</code>.</div></details>
+  <details class="qa"><summary><code>curl -X POST $API/v1/health</code> returns <code>{"message":"Not Found"}</code>. Did our Lambda run? How can you tell?</summary><div class="a">No. Two clues: the body isn't in our error format (<code>{"error": {"code": …}}</code>), and the log tail shows no new line. Only <code>GET</code> is registered for <code>/v1/health</code>, so API Gateway rejected the request before calling the Lambda.</div></details>
+  <details class="qa"><summary>What three resources does one <code>api.addRoutes</code> create, and which one causes a 500 if missing?</summary><div class="a">A Route, an Integration, and a Lambda Permission. Without the permission, API Gateway is not allowed to invoke the function and returns a 500. CDK adds it for you; hand-written CloudFormation often forgets it.</div></details>
+  <details class="qa"><summary>Why does the event say <code>"GET /v1/jobs/{jobId}"</code> instead of the real ID?</summary><div class="a"><code>routeKey</code> is the route's <em>template</em>, which is exactly what makes our <code>ROUTES</code> dictionary lookup work. The real value is in <code>event["pathParameters"]["jobId"]</code>. The name <code>jobId</code> comes from <code>{jobId}</code> in the CDK path.</div></details>
+  <details class="qa"><summary>Why did we pick HTTP API instead of REST API?</summary><div class="a">It's about 70% cheaper (~$1 vs ~$3.50 per million requests), adds less latency, and has a built-in JWT authorizer, which we need for Cognito in Sprint 3. We don't need REST-only extras like API keys, usage plans or response caching.</div></details>
+  <details class="qa"><summary>Who gives the Lambda permission to write logs, and where are its AWS credentials?</summary><div class="a">CDK auto-creates an execution role with the basic execution policy (write to CloudWatch Logs). Lambda gives each invocation temporary credentials for that role, and boto3 finds them automatically. There are never access keys in our code.</div></details>
+  <details class="qa"><summary>Why does the body we return have to go through <code>json.dumps</code>?</summary><div class="a">API Gateway expects <code>body</code> to be a <strong>string</strong>. <code>json.dumps</code> turns our Python dict into a JSON string. The <code>default=json_default</code> part converts DynamoDB <code>Decimal</code> numbers, which <code>json.dumps</code> can't handle by itself.</div></details>
+</div>
+</section>
+
+<nav class="pager" aria-label="Previous and next chapter">
+  <a class="prev" href="02-infrastructure-as-code-with-cdk.html"><small>← Previous</small>2 · Infrastructure as code with CDK</a>
+  <a class="next" href="04-hosting-the-ui-s3-cloudfront.html"><small>Next →</small>4 · Hosting the UI</a>
+</nav>
+</main>
+</body>
+</html>

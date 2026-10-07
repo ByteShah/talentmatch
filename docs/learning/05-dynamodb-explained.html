@@ -1,0 +1,826 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DynamoDB Explained</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+  <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah" d="M0,0 L10,5 L0,10 z"/></marker>
+  <marker id="arb" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah blue" d="M0,0 L10,5 L0,10 z"/></marker>
+  <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah red" d="M0,0 L10,5 L0,10 z"/></marker>
+  <marker id="arg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah green" d="M0,0 L10,5 L0,10 z"/></marker>
+</defs></svg>
+
+<nav class="topbar" aria-label="Chapters"><div class="in">
+  <a class="home" href="index.html">TalentMatch book</a>
+  <a href="00-plan-and-design.html">0 Plan</a>
+  <a href="01-aws-basics-and-account-setup.html">1 AWS</a>
+  <a href="02-infrastructure-as-code-with-cdk.html">2 CDK</a>
+  <a href="03-lambda-and-the-health-api.html">3 Lambda</a>
+  <a href="04-hosting-the-ui-s3-cloudfront.html">4 UI hosting</a>
+  <a class="here" href="05-dynamodb-explained.html">5 DynamoDB</a>
+  <a href="06-building-the-jobs-api.html">6 Jobs API</a>
+  <a href="07-testing-debugging-and-habits.html">7 Debugging</a>
+</div></nav>
+
+<main>
+<header class="hero">
+  <div class="num">05</div>
+  <div class="kicker">Chapter 5 · Sprint 2a · Theory</div>
+  <h1>DynamoDB explained</h1>
+  <p class="sub">How AWS's serverless database stores data, why its keys work the way they do, and how to read and write it cheaply. This is everything you need before you write the Jobs API in Chapter 6.</p>
+  <div class="learn">
+    <h3>What you will learn</h3>
+    <ul>
+      <li>Tables, items, attributes and data types</li>
+      <li>Partition key (PK) and sort key (SK)</li>
+      <li>Why a PK must always be an exact match</li>
+      <li>Single-table design, and how it differs from SQL</li>
+      <li>Designing access patterns before the table</li>
+      <li>Global secondary indexes (GSIs), overloading and sparse indexes</li>
+      <li>Query vs Scan, and what you actually pay for</li>
+      <li>Conditional writes and the overwrite trap</li>
+      <li>Pagination with LastEvaluatedKey and nextToken</li>
+      <li>Consistency, hot partitions and size limits</li>
+    </ul>
+  </div>
+  <nav class="toc" aria-label="In this chapter">
+    <a href="#s1">5.1 Meet DynamoDB</a><a href="#s2">5.2 PK and SK</a><a href="#s3">5.3 Why PK is exact</a>
+    <a href="#s4">5.4 Single-table</a><a href="#s5">5.5 Access patterns</a><a href="#s6">5.6 GSIs</a>
+    <a href="#s7">5.7 Query vs Scan</a><a href="#s8">5.8 Conditional writes</a><a href="#s9">5.9 Pagination</a>
+    <a href="#s10">5.10 Consistency</a><a href="#s11">5.11 Limits</a><a href="#s12">5.12 The lab</a>
+    <a href="#s13">5.13 Your answers</a><a href="#s14">5.14 Explore more</a><a href="#qa">Check yourself</a>
+  </nav>
+</header>
+
+<!-- ================= 5.1 ================= -->
+<section id="s1">
+<h2><span class="n">5.1</span>Meet DynamoDB</h2>
+<p class="lead">DynamoDB is a database you never manage. There's no server, no disk and no version to upgrade. You create a table and read and write items, and you pay per request.</p>
+
+<div class="box simple"><span class="label">In simple words</span>
+<p>Picture a huge library run by a very fast librarian. The library is divided into <strong>folders</strong>. Every folder has a name on the front, like <code>JOB#1</code>, and inside are <strong>pages</strong> kept in alphabetical order, like <code>APP#cand-a</code>, <code>APP#cand-b</code> and <code>META</code>.</p>
+<p>To find something, you tell the librarian the folder name, and optionally which pages. The librarian walks straight to that folder. You never wander the shelves yourself.</p>
+</div>
+
+<div class="box tech"><span class="label">Technical view</span>
+<p>A <strong>table</strong> holds <strong>items</strong> (rows). Each item is a set of <strong>attributes</strong> (name/value pairs). Only the key attributes are required. Every other attribute is optional, and two items in the same table can have completely different attributes, because there is no fixed schema.</p>
+<p>DynamoDB spreads the data over many servers called <strong>partitions</strong>, so it stays fast whether you have 10 items or 10 billion.</p>
+</div>
+
+<figure>
+  <svg viewBox="0 0 760 320" role="img" aria-label="Folders named by PK, each containing pages sorted by SK, with attributes beside each page">
+    <text class="gt" x="20" y="30">PK = which folder</text>
+    <text class="gt" x="200" y="30">SK = which page (sorted)</text>
+    <text class="gt" x="400" y="30">other attributes</text>
+    <rect class="bx aws" x="20" y="45" width="150" height="130" rx="10"/>
+    <text class="t" x="36" y="70">JOB#1</text><text class="s" x="36" y="88">one item collection</text>
+    <rect class="bx" x="200" y="50" width="170" height="34" rx="6"/><text class="m" x="212" y="72">META</text>
+    <rect class="bx" x="200" y="93" width="170" height="34" rx="6"/><text class="m" x="212" y="115">APP#cand-a</text>
+    <rect class="bx" x="200" y="136" width="170" height="34" rx="6"/><text class="m" x="212" y="158">APP#cand-b</text>
+    <text class="m" x="400" y="72">title = "Odoo Developer"</text>
+    <text class="m" x="400" y="115">score = 90</text>
+    <text class="m" x="400" y="158">score = 49</text>
+    <path class="w" d="M170 67 H196" marker-end="url(#ar)"/><path class="w" d="M170 110 H196" marker-end="url(#ar)"/><path class="w" d="M170 153 H196" marker-end="url(#ar)"/>
+    <rect class="bx aws" x="20" y="195" width="150" height="44" rx="10"/><text class="t" x="36" y="222">JOB#2</text>
+    <rect class="bx" x="200" y="200" width="170" height="34" rx="6"/><text class="m" x="212" y="222">META</text>
+    <text class="m" x="400" y="222">title = "React Developer"</text>
+    <path class="w" d="M170 217 H196" marker-end="url(#ar)"/>
+    <rect class="bx user" x="20" y="259" width="150" height="44" rx="10"/><text class="t" x="36" y="286">CAND#a</text>
+    <rect class="bx" x="200" y="264" width="170" height="34" rx="6"/><text class="m" x="212" y="286">PROFILE</text>
+    <text class="m" x="400" y="286">name = "Asha", skills = [...]</text>
+    <path class="w" d="M170 281 H196" marker-end="url(#ar)"/>
+  </svg>
+  <figcaption>Figure 5.1 · A DynamoDB table seen as folders (PK) holding sorted pages (SK). Each page is one item.</figcaption>
+</figure>
+
+<h3>Data types</h3>
+<p>Every value has a type. The raw AWS API (and the CLI) makes you write the type next to every value. Python's boto3 <code>resource</code> API does that conversion for you.</p>
+<div class="tw"><table>
+  <tr><th>Type code</th><th>Meaning</th><th>CLI / raw JSON</th><th>In Python (boto3)</th></tr>
+  <tr><td><code>S</code></td><td>String</td><td><code>{"S": "Odoo Developer"}</code></td><td><code>"Odoo Developer"</code></td></tr>
+  <tr><td><code>N</code></td><td>Number (always sent as text)</td><td><code>{"N": "90"}</code></td><td><code>Decimal("90")</code> ⚠</td></tr>
+  <tr><td><code>BOOL</code></td><td>True / false</td><td><code>{"BOOL": true}</code></td><td><code>True</code></td></tr>
+  <tr><td><code>L</code> / <code>M</code></td><td>List / map (nested object)</td><td><code>{"L": [{"S": "react"}]}</code></td><td><code>["react"]</code> / <code>{...}</code></td></tr>
+  <tr><td><code>NULL</code></td><td>Empty value</td><td><code>{"NULL": true}</code></td><td><code>None</code></td></tr>
+</table></div>
+
+<div class="box warn"><span class="label">Watch out: numbers come back as Decimal</span>
+<p>boto3 returns every number as Python's <code>Decimal</code> type, so that no precision is lost. But <code>json.dumps(Decimal("90"))</code> crashes with <code>TypeError: Object of type Decimal is not JSON serializable</code>. That's why <code>app.py</code> has a <code>json_default</code> helper that turns <code>Decimal("90")</code> into <code>90</code> and <code>Decimal("90.5")</code> into <code>90.5</code>. Jobs have no numbers yet, but scores will in Sprint 9.</p>
+</div>
+
+<h3>Technical terms</h3>
+<div class="tw"><table class="terms">
+  <tr><th>Term</th><th>Simple meaning</th><th>Example from our project</th></tr>
+  <tr><td>Table</td><td>The whole library</td><td><code>TalentMatch-dev-TableCD117FA1-…</code></td></tr>
+  <tr><td>Item</td><td>One page in a folder (one row)</td><td>The "Odoo Developer" job</td></tr>
+  <tr><td>Attribute</td><td>One field on a page</td><td><code>title</code>, <code>status</code>, <code>createdAt</code></td></tr>
+  <tr><td>Schemaless</td><td>Pages don't need the same fields</td><td>A job has <code>title</code>; an application will have <code>score</code></td></tr>
+  <tr><td>Partition</td><td>One of the servers that holds folders</td><td>Hidden from you; AWS manages it</td></tr>
+  <tr><td>boto3</td><td>The AWS toolkit for Python</td><td><code>boto3.resource("dynamodb")</code> in <code>jobs.py</code></td></tr>
+  <tr><td>Decimal</td><td>Python's exact-number type</td><td>What a stored <code>score</code> comes back as</td></tr>
+</table></div>
+</section>
+
+<!-- ================= 5.2 ================= -->
+<section id="s2">
+<h2><span class="n">5.2</span>Keys: the partition key and the sort key</h2>
+<p class="lead">Every item is found by its key. The key has two parts: the PK picks the folder and the SK picks the page. Together they must be unique.</p>
+
+<div class="box simple"><span class="label">In simple words</span>
+<p>Think of a school cupboard. The <strong>PK</strong> is the name on the drawer (<em>"Class 5B"</em>). The <strong>SK</strong> is the label on each file inside it, and the files are kept in order (<em>"Asha", "Ben", "Chen"</em>). To grab one file you need both: the drawer and the file label.</p>
+<p>All the files in one drawer are called an <strong>item collection</strong>. One trip to one drawer can bring back any range of files from it, like "all files starting with B".</p>
+</div>
+
+<div class="box tech"><span class="label">Technical view</span>
+<ul>
+  <li><strong>Partition key (PK, called <code>HASH</code> in the API)</strong>: DynamoDB hashes it to decide which partition stores the item. Lookups need an <strong>exact</strong> PK.</li>
+  <li><strong>Sort key (SK, called <code>RANGE</code>)</strong>: keeps items with the same PK in sorted order, so you can ask for <strong>ranges</strong> with <code>=</code>, <code>&lt;</code>, <code>&gt;</code>, <code>between</code> and <code>begins_with</code>.</li>
+  <li>The pair <strong>PK + SK</strong> is the <strong>primary key</strong>, and it must be unique in the table.</li>
+</ul>
+</div>
+
+<div class="tw"><table>
+  <tr><th>Key</th><th>Allowed conditions</th><th>Why</th></tr>
+  <tr><td><strong>PK</strong></td><td>Only <code>=</code> (exact match)</td><td>Hashed, so similar names end up scattered across partitions</td></tr>
+  <tr><td><strong>SK</strong></td><td><code>=</code> <code>&lt;</code> <code>&lt;=</code> <code>&gt;</code> <code>&gt;=</code> <code>between</code> <code>begins_with</code></td><td>Stored sorted inside the folder</td></tr>
+</table></div>
+
+<p>Our key design for jobs and applications (applications arrive in Sprint 5):</p>
+<div class="tw"><table>
+  <tr><th>Item type</th><th>PK</th><th>SK</th></tr>
+  <tr><td>Job</td><td><code>JOB#&lt;id&gt;</code></td><td><code>META</code></td></tr>
+  <tr><td>Application</td><td><code>JOB#&lt;id&gt;</code></td><td><code>APP#&lt;candidateId&gt;</code></td></tr>
+  <tr><td>Candidate</td><td><code>CAND#&lt;id&gt;</code></td><td><code>PROFILE</code></td></tr>
+</table></div>
+<p>The <code>JOB#</code> and <code>CAND#</code> prefixes are only a naming convention. To DynamoDB they're plain strings, but they let a human (and your code) see what kind of item each key is.</p>
+
+<h3>Technical terms</h3>
+<div class="tw"><table class="terms">
+  <tr><th>Term</th><th>Simple meaning</th><th>Example from our project</th></tr>
+  <tr><td>Partition key (PK)</td><td>Drawer name; must be exact</td><td><code>JOB#3f2a…</code></td></tr>
+  <tr><td>Sort key (SK)</td><td>File label inside the drawer, kept in order</td><td><code>META</code>, <code>APP#cand-a</code></td></tr>
+  <tr><td>Primary key</td><td>PK + SK together; unique</td><td><code>JOB#3f2a…</code> + <code>META</code></td></tr>
+  <tr><td>Item collection</td><td>Everything in one drawer</td><td>A job and all its applications</td></tr>
+  <tr><td>HASH / RANGE</td><td>AWS's internal names for PK / SK</td><td><code>KeyType=HASH</code> in the lab command</td></tr>
+</table></div>
+</section>
+
+<!-- ================= 5.3 ================= -->
+<section id="s3">
+<h2><span class="n">5.3</span>Why a PK must be an exact match</h2>
+<p class="lead">DynamoDB doesn't store PKs in alphabetical order. It scrambles each one with a hash function and uses the result to choose a partition. So <code>JOB#1</code> and <code>JOB#2</code> are not neighbours.</p>
+
+<div class="box simple"><span class="label">In simple words</span>
+<p>Imagine a sorting machine at a post office. Each letter's name goes in, and the machine prints a random-looking bin number: "JOB#1 → bin 7", "JOB#2 → bin 2". The machine always gives the same name the same bin, so finding <em>one</em> letter is instant.</p>
+<p>But if you ask "give me every letter whose name starts with JOB#", the machine can't help. Those letters are in bins 7, 2, 11… you would have to open every bin. That's a Scan.</p>
+</div>
+
+<figure>
+  <svg viewBox="0 0 760 250" role="img" aria-label="Four keys pass through a hash function and land on different partitions; begins_with on PK would need to read every partition">
+    <text class="gt" x="20" y="22">key</text><text class="gt" x="180" y="22">hash(key)</text><text class="gt" x="390" y="22">stored on</text>
+    <rect class="bx aws" x="20" y="35" width="110" height="34" rx="6"/><text class="m" x="34" y="57">JOB#1</text>
+    <rect class="bx aws" x="20" y="85" width="110" height="34" rx="6"/><text class="m" x="34" y="107">JOB#2</text>
+    <rect class="bx aws" x="20" y="135" width="110" height="34" rx="6"/><text class="m" x="34" y="157">JOB#3</text>
+    <rect class="bx user" x="20" y="185" width="110" height="34" rx="6"/><text class="m" x="34" y="207">CAND#a</text>
+    <path class="w" d="M130 52 H170" marker-end="url(#ar)"/><path class="w" d="M130 102 H170" marker-end="url(#ar)"/>
+    <path class="w" d="M130 152 H170" marker-end="url(#ar)"/><path class="w" d="M130 202 H170" marker-end="url(#ar)"/>
+    <rect class="bx data" x="175" y="35" width="170" height="34" rx="6"/><text class="m" x="189" y="57">0x7f3a… → A</text>
+    <rect class="bx data" x="175" y="85" width="170" height="34" rx="6"/><text class="m" x="189" y="107">0x12c9… → C</text>
+    <rect class="bx data" x="175" y="135" width="170" height="34" rx="6"/><text class="m" x="189" y="157">0xb04e… → B</text>
+    <rect class="bx data" x="175" y="185" width="170" height="34" rx="6"/><text class="m" x="189" y="207">0x6d11… → A</text>
+    <path class="w" d="M345 52 H385" marker-end="url(#ar)"/><path class="w" d="M345 102 H385" marker-end="url(#ar)"/>
+    <path class="w" d="M345 152 H385" marker-end="url(#ar)"/><path class="w" d="M345 202 H385" marker-end="url(#ar)"/>
+    <rect class="bx" x="390" y="35" width="130" height="34" rx="6"/><text class="t" x="404" y="57">Partition A</text>
+    <rect class="bx" x="390" y="85" width="130" height="34" rx="6"/><text class="t" x="404" y="107">Partition C</text>
+    <rect class="bx" x="390" y="135" width="130" height="34" rx="6"/><text class="t" x="404" y="157">Partition B</text>
+    <rect class="bx" x="390" y="185" width="130" height="34" rx="6"/><text class="t" x="404" y="207">Partition A</text>
+    <rect class="bx warn" x="550" y="35" width="195" height="184" rx="10"/>
+    <text class="t" x="566" y="62">begins_with(PK, "JOB#")?</text>
+    <text class="s" x="566" y="88">JOB# keys live on A, B and C,</text>
+    <text class="s" x="566" y="106">scattered by the hash.</text>
+    <text class="s" x="566" y="132">To find them all, DynamoDB</text>
+    <text class="s" x="566" y="150">would read every partition.</text>
+    <text class="s" x="566" y="176">That is a Scan, so Query</text>
+    <text class="s" x="566" y="194">refuses: ValidationException.</text>
+  </svg>
+  <figcaption>Figure 5.2 · Hashing scatters similar PKs across partitions. That's why a Query needs one exact PK.</figcaption>
+</figure>
+
+<div class="box tech"><span class="label">Technical view</span>
+<p>A Query's <code>KeyConditionExpression</code> <strong>must</strong> contain <code>PK = :value</code>. It may also add one condition on the SK. Anything else on the PK, such as <code>begins_with(PK, …)</code> or <code>PK &gt; …</code>, returns <code>ValidationException: Query key condition not supported</code>.</p>
+<p>So how do we "list all jobs"? We give every job the <strong>same</strong> value in a second key, <code>GSI1PK = "JOB"</code>, and query that index with an exact match (Section 5.6).</p>
+</div>
+
+<h3>Technical terms</h3>
+<div class="tw"><table class="terms">
+  <tr><th>Term</th><th>Simple meaning</th><th>Example from our project</th></tr>
+  <tr><td>Hash function</td><td>A machine that turns a name into a fixed, random-looking number</td><td><code>JOB#1</code> → some partition</td></tr>
+  <tr><td>Key condition</td><td>The part of a Query that says which folder (and pages)</td><td><code>Key("GSI1PK").eq("JOB")</code></td></tr>
+  <tr><td>ValidationException</td><td>"Your request is not allowed as written"</td><td>Lab command 5</td></tr>
+</table></div>
+</section>
+
+<!-- ================= 5.4 ================= -->
+<section id="s4">
+<h2><span class="n">5.4</span>Single-table design</h2>
+<p class="lead">In SQL you make one table per kind of thing and join them together. DynamoDB has no joins. So you put every kind of item in one table, and let the key values say what each item is.</p>
+
+<div class="box simple"><span class="label">In simple words</span>
+<p>SQL is like keeping three separate notebooks, one for jobs, one for candidates and one for applications. To see a job and its applicants, you flip between notebooks and match numbers. That's a "join".</p>
+<p>Single-table design is one notebook where a job's page and all its applicants' pages are <strong>stapled together in the same folder</strong>. One grab gets all of them.</p>
+</div>
+
+<figure>
+  <svg viewBox="0 0 760 300" role="img" aria-label="Left: three SQL tables linked by join lines. Right: one DynamoDB table where a job and its applications share a PK">
+    <text class="gt" x="20" y="22">SQL: 3 tables + JOIN</text>
+    <rect class="bx" x="20" y="40" width="150" height="90" rx="8"/><text class="t" x="34" y="62">jobs</text>
+    <text class="m" x="34" y="84">id | title</text><text class="m" x="34" y="102">1  | Odoo Dev</text><text class="m" x="34" y="120">2  | React Dev</text>
+    <rect class="bx" x="20" y="175" width="150" height="90" rx="8"/><text class="t" x="34" y="197">candidates</text>
+    <text class="m" x="34" y="219">id | name</text><text class="m" x="34" y="237">a  | Asha</text><text class="m" x="34" y="255">b  | Ben</text>
+    <rect class="bx" x="210" y="100" width="150" height="110" rx="8"/><text class="t" x="224" y="122">applications</text>
+    <text class="m" x="224" y="144">job | cand | score</text><text class="m" x="224" y="162">1   | a    | 90</text><text class="m" x="224" y="180">1   | b    | 49</text>
+    <path class="w dash" d="M170 85 C190 85 190 140 206 140" marker-end="url(#ar)"/>
+    <path class="w dash" d="M170 220 C190 220 190 170 206 170" marker-end="url(#ar)"/>
+    <text class="lb" x="214" y="232">JOIN on job_id, cand_id</text>
+    <line class="w" x1="385" y1="30" x2="385" y2="285"/>
+    <text class="gt" x="405" y="22">DynamoDB: 1 table, keys say what it is</text>
+    <rect class="bx" x="405" y="40" width="340" height="160" rx="8"/>
+    <text class="lb" x="415" y="60">PK</text><text class="lb" x="505" y="60">SK</text><text class="lb" x="620" y="60">data</text>
+    <rect class="bx aws" x="408" y="68" width="334" height="78" rx="4"/>
+    <text class="m" x="415" y="86">JOB#1</text><text class="m" x="505" y="86">META</text><text class="m" x="620" y="86">title=Odoo Dev</text>
+    <text class="m" x="415" y="110">JOB#1</text><text class="m" x="505" y="110">APP#a</text><text class="m" x="620" y="110">score=90</text>
+    <text class="m" x="415" y="134">JOB#1</text><text class="m" x="505" y="134">APP#b</text><text class="m" x="620" y="134">score=49</text>
+    <text class="m" x="415" y="166">JOB#2</text><text class="m" x="505" y="166">META</text><text class="m" x="620" y="166">title=React Dev</text>
+    <text class="m" x="415" y="190">CAND#a</text><text class="m" x="505" y="190">PROFILE</text><text class="m" x="620" y="190">name=Asha</text>
+    <text class="s" x="405" y="225">Blue band = one item collection: a job and its applicants.</text>
+    <text class="s" x="405" y="243">One Query (PK = JOB#1) returns all three. No join needed.</text>
+  </svg>
+  <figcaption>Figure 5.3 · The same data in SQL (joined at read time) and in a single DynamoDB table (grouped at write time).</figcaption>
+</figure>
+
+<div class="box tech"><span class="label">Technical view</span>
+<p>Single-table design <strong>pre-joins</strong> data by giving related items the same PK. The table uses generic attribute names (<code>PK</code>, <code>SK</code>, <code>GSI1PK</code>, <code>GSI1SK</code>), because their meaning depends on the item type. It's the approach in our plan's ADR-004: one table, on-demand billing, and keys chosen for queries we already know about.</p>
+<p>The trade-off: ad-hoc questions you didn't plan for (like "every job with 'React' in the description") are hard. The plan accepts this and adds vector search in Sprint 10 for free-text questions.</p>
+</div>
+
+<h3>Technical terms</h3>
+<div class="tw"><table class="terms">
+  <tr><th>Term</th><th>Simple meaning</th><th>Example from our project</th></tr>
+  <tr><td>Join</td><td>Matching rows from two SQL tables</td><td>Not available in DynamoDB</td></tr>
+  <tr><td>Single-table design</td><td>All item types in one table</td><td>Jobs, applications and candidates all share our one table</td></tr>
+  <tr><td>Pre-joining</td><td>Storing related items together up front</td><td>Applications use the job's PK</td></tr>
+  <tr><td>Generic key names</td><td>Keys named by position, not meaning</td><td><code>PK</code>, not <code>jobId</code></td></tr>
+</table></div>
+</section>
+
+<!-- ================= 5.5 ================= -->
+<section id="s5">
+<h2><span class="n">5.5</span>The golden rule: access patterns first</h2>
+<p class="lead">In SQL you design the tables first and write any query later. In DynamoDB it's the reverse: list every question the app will ask, then choose keys so each question is one Query or GetItem.</p>
+
+<div class="box simple"><span class="label">In simple words</span>
+<p>Before building a bookshelf, decide how you'll look for books. If you always look by author, put the author's name on each shelf. If you sometimes look by year too, you need a second shelf label: that's an index. Building the shelf first and asking later means re-shelving every book.</p>
+</div>
+
+<div class="tw"><table>
+  <tr><th>#</th><th>Question the app asks</th><th>How the keys answer it</th><th>Sprint</th></tr>
+  <tr><td>1</td><td>Get one job</td><td>GetItem <code>PK = JOB#&lt;id&gt;</code>, <code>SK = META</code></td><td>2a ✅</td></tr>
+  <tr><td>2</td><td>List all jobs, newest first</td><td>Query GSI1: <code>GSI1PK = "JOB"</code>, sorted by <code>GSI1SK = &lt;createdAt&gt;#&lt;id&gt;</code>, reversed</td><td>2a ✅</td></tr>
+  <tr><td>3</td><td>All applicants for a job</td><td>Query <code>PK = JOB#&lt;id&gt;</code>, <code>SK begins_with "APP#"</code></td><td>5</td></tr>
+  <tr><td>4</td><td>All jobs a candidate applied to</td><td>Query GSI1: <code>GSI1PK = CAND#&lt;id&gt;</code></td><td>5</td></tr>
+</table></div>
+
+<div class="box warn"><span class="label">Watch out</span>
+<p>Changing keys later is painful. Every existing item must be rewritten with new key values, because keys can't be updated in place. A few minutes with a table like this one saves days of migration.</p>
+</div>
+
+<h3>Technical terms</h3>
+<div class="tw"><table class="terms">
+  <tr><th>Term</th><th>Simple meaning</th><th>Example from our project</th></tr>
+  <tr><td>Access pattern</td><td>A question the app asks the database</td><td>"List all jobs, newest first"</td></tr>
+  <tr><td>GetItem</td><td>Fetch exactly one item by full key</td><td><code>get_job()</code> in <code>jobs.py</code></td></tr>
+  <tr><td>Query</td><td>Fetch many items from one PK</td><td><code>list_jobs()</code> in <code>jobs.py</code></td></tr>
+</table></div>
+</section>
+
+<!-- ================= 5.6 ================= -->
+<section id="s6">
+<h2><span class="n">5.6</span>Global secondary indexes (GSIs)</h2>
+<p class="lead">A GSI is a second copy of your items, organised by different keys. DynamoDB keeps it up to date automatically. It gives you a second way in when the main keys can't answer a question.</p>
+
+<div class="box simple"><span class="label">In simple words</span>
+<p>A school keeps student files sorted by class. The office also keeps a second card box sorted by <em>birthday</em>, so it can find "everyone born in October" quickly. Whenever a student file changes, a helper updates the card box. You never update it yourself. That card box is a GSI.</p>
+</div>
+
+<figure>
+  <svg viewBox="0 0 760 300" role="img" aria-label="Main table rows are copied into GSI1 grouped by GSI1PK and sorted by GSI1SK; an item without GSI1PK is not copied">
+    <text class="gt" x="20" y="22">Main table</text>
+    <rect class="bx" x="20" y="34" width="340" height="200" rx="8"/>
+    <text class="lb" x="30" y="54">PK</text><text class="lb" x="110" y="54">SK</text><text class="lb" x="180" y="54">GSI1PK</text><text class="lb" x="250" y="54">GSI1SK</text>
+    <text class="m" x="30" y="82">JOB#a1</text><text class="m" x="110" y="82">META</text><text class="m" x="180" y="82">JOB</text><text class="m" x="250" y="82">10-05#a1</text>
+    <text class="m" x="30" y="112">JOB#b2</text><text class="m" x="110" y="112">META</text><text class="m" x="180" y="112">JOB</text><text class="m" x="250" y="112">10-07#b2</text>
+    <text class="m" x="30" y="142">JOB#a1</text><text class="m" x="110" y="142">APP#c1</text><text class="m" x="180" y="142">CAND#c1</text><text class="m" x="250" y="142">APP#a1</text>
+    <rect class="bx bad" x="24" y="160" width="332" height="30" rx="4"/>
+    <text class="m" x="30" y="180">TEST#x</text><text class="m" x="110" y="180">META</text><text class="m" x="180" y="180">—</text><text class="m" x="250" y="180">—</text>
+    <text class="s" x="30" y="220">GSI1SK shortened; really "2026-10-07T…#b2"</text>
+    <path class="w blue" d="M362 120 H432" marker-end="url(#arb)"/>
+    <text class="lb" x="366" y="108">auto-copied</text>
+    <text class="gt" x="440" y="22">GSI1 (sorted by GSI1PK, then GSI1SK)</text>
+    <rect class="bx aws" x="440" y="34" width="300" height="110" rx="8"/>
+    <text class="t" x="454" y="56">GSI1PK = JOB</text>
+    <text class="m" x="454" y="82">10-05#a1 → JOB#a1</text>
+    <text class="m" x="454" y="106">10-07#b2 → JOB#b2</text>
+    <text class="s" x="454" y="130">ScanIndexForward=False reads bottom-up</text>
+    <rect class="bx user" x="440" y="156" width="300" height="56" rx="8"/>
+    <text class="t" x="454" y="178">GSI1PK = CAND#c1</text>
+    <text class="m" x="454" y="200">APP#a1 → JOB#a1 / APP#c1</text>
+    <rect class="bx bad" x="440" y="224" width="300" height="56" rx="8"/>
+    <text class="t" x="454" y="246">TEST#x is not here</text>
+    <text class="s" x="454" y="266">No GSI1PK = skipped (sparse index)</text>
+    <path class="w red dash" d="M356 175 C400 175 400 252 436 252" marker-end="url(#arr)"/>
+  </svg>
+  <figcaption>Figure 5.4 · GSI1 groups items by GSI1PK and sorts them by GSI1SK. One index serves jobs and (later) candidates, and items without GSI1PK are left out.</figcaption>
+</figure>
+
+<h3>Three ideas to remember</h3>
+<div class="three">
+  <div class="card"><h4>Overloading</h4><p>One index answers several questions. Jobs use <code>GSI1PK = "JOB"</code>, and applications will use <code>GSI1PK = CAND#&lt;id&gt;</code>. That's why the names are generic.</p></div>
+  <div class="card"><h4>Sparse</h4><p>An item is copied into a GSI <strong>only if it has the GSI's key attributes</strong>. No <code>GSI1PK</code> means it's not in GSI1. You can use this on purpose, e.g. "open jobs only".</p></div>
+  <div class="card"><h4>Sort by time</h4><p><code>GSI1SK = "2026-10-07T09:15…#&lt;id&gt;"</code>. ISO dates sort alphabetically in time order, and the <code>#id</code> keeps two jobs from the same microsecond unique.</p></div>
+</div>
+
+<div class="box tech"><span class="label">Technical view</span>
+<ul>
+  <li>A GSI has its own PK (and optional SK) and its own capacity. On-demand billing covers it automatically.</li>
+  <li>Writes to the table are copied to each GSI <strong>asynchronously</strong>, usually within milliseconds. That's why GSI reads are always <strong>eventually consistent</strong> (Section 5.10).</li>
+  <li>The <strong>projection</strong> says which attributes are copied. CDK's default is <code>ALL</code>, so a GSI query returns full items without a second read.</li>
+  <li>A GSI's keys don't need to be unique. Many items can share <code>GSI1PK = "JOB"</code> and even the same GSI1SK.</li>
+  <li>Each write that touches a GSI costs an extra write unit for the copy.</li>
+</ul>
+</div>
+
+<h3>Technical terms</h3>
+<div class="tw"><table class="terms">
+  <tr><th>Term</th><th>Simple meaning</th><th>Example from our project</th></tr>
+  <tr><td>GSI</td><td>A second, auto-updated copy sorted by other keys</td><td><code>GSI1</code></td></tr>
+  <tr><td>Index overloading</td><td>One index, many item types</td><td><code>JOB</code> and <code>CAND#…</code> both in GSI1</td></tr>
+  <tr><td>Sparse index</td><td>Only items with the index keys appear</td><td>Delete <code>GSI1PK</code> and the job vanishes from the list</td></tr>
+  <tr><td>Projection</td><td>Which fields are copied to the index</td><td><code>ALL</code> (CDK default)</td></tr>
+  <tr><td>ScanIndexForward</td><td>Read direction on the sort key (nothing to do with Scan)</td><td><code>False</code> = newest first</td></tr>
+</table></div>
+</section>
+
+<!-- ================= 5.7 ================= -->
+<section id="s7">
+<h2><span class="n">5.7</span>Query vs Scan, and what you pay for</h2>
+<p class="lead">You pay for what DynamoDB <strong>reads</strong>, not for what it returns. A Query reads one folder; a Scan reads the whole table and then throws away what doesn't match.</p>
+
+<div class="box simple"><span class="label">In simple words</span>
+<p>Ask the librarian for "applications in folder JOB#1" and she walks to one folder and hands you two pages. Ask her to "check every page in the library and give me the applications" and she reads every single page, then gives you the same two. Both times you get 2 pages. The second time she charges you for reading <strong>all</strong> of them.</p>
+</div>
+
+<figure>
+  <svg viewBox="0 0 760 270" role="img" aria-label="Query reads only two items; Scan reads all four and discards two">
+    <text class="gt" x="20" y="22">Query  PK = JOB#1, SK begins_with APP#</text>
+    <rect class="bx ghost" x="20" y="40" width="170" height="36" rx="6"/><text class="m" x="32" y="63">JOB#1  META</text>
+    <rect class="bx aws" x="20" y="86" width="170" height="36" rx="6"/><text class="m" x="32" y="109">JOB#1  APP#cand-a</text>
+    <rect class="bx aws" x="20" y="132" width="170" height="36" rx="6"/><text class="m" x="32" y="155">JOB#1  APP#cand-b</text>
+    <rect class="bx ghost" x="20" y="178" width="170" height="36" rx="6"/><text class="m" x="32" y="201">JOB#2  META</text>
+    <path class="w blue" d="M190 104 H240" marker-end="url(#arb)"/><path class="w blue" d="M190 150 H240" marker-end="url(#arb)"/>
+    <rect class="bx user" x="245" y="86" width="110" height="82" rx="8"/><text class="t" x="259" y="112">You get 2</text><text class="s" x="259" y="132">read 2</text><text class="s" x="259" y="150">pay for 2</text>
+    <text class="s" x="20" y="240">Count = 2 · ScannedCount = 2</text>
+    <line class="w" x1="380" y1="30" x2="380" y2="250"/>
+    <text class="gt" x="400" y="22">Scan + filter begins_with(SK, APP#)</text>
+    <rect class="bx warn" x="400" y="40" width="170" height="36" rx="6"/><text class="m" x="412" y="63">JOB#1  META</text>
+    <rect class="bx warn" x="400" y="86" width="170" height="36" rx="6"/><text class="m" x="412" y="109">JOB#1  APP#cand-a</text>
+    <rect class="bx warn" x="400" y="132" width="170" height="36" rx="6"/><text class="m" x="412" y="155">JOB#1  APP#cand-b</text>
+    <rect class="bx warn" x="400" y="178" width="170" height="36" rx="6"/><text class="m" x="412" y="201">JOB#2  META</text>
+    <path class="w red" d="M405 58 L565 58"/><path class="w red" d="M405 196 L565 196"/>
+    <path class="w blue" d="M570 104 H620" marker-end="url(#arb)"/><path class="w blue" d="M570 150 H620" marker-end="url(#arb)"/>
+    <rect class="bx user" x="625" y="86" width="120" height="82" rx="8"/><text class="t" x="639" y="112">You get 2</text><text class="s" x="639" y="132">read 4</text><text class="s" x="639" y="150">pay for 4</text>
+    <text class="s" x="400" y="240">Count = 2 · ScannedCount = 4 (2 thrown away)</text>
+  </svg>
+  <figcaption>Figure 5.5 · The same answer, two different bills. <code>ScannedCount</code> is what you pay for; <code>Count</code> is what you get back.</figcaption>
+</figure>
+
+<figure>
+  <svg viewBox="0 0 760 170" role="img" aria-label="Bar chart: in a 100,000 item table, a query reads 2 items and a scan reads 100,000">
+    <text class="gt" x="20" y="22">Same question, real table of 100,000 items</text>
+    <text class="t" x="20" y="62">Query</text>
+    <rect class="fill-blue" x="110" y="46" width="4" height="24" rx="2"/>
+    <text class="m" x="122" y="63">2 items read · about 0.5 read units</text>
+    <text class="t" x="20" y="112">Scan</text>
+    <rect class="fill-red" x="110" y="96" width="620" height="24" rx="3"/>
+    <text class="m" x="120" y="113" style="fill:#fff">100,000 items read · about 12,500 read units</text>
+    <text class="s" x="20" y="152">Assumes 1 KB items, eventually consistent reads (4 KB per unit, half price). The Scan bar is 50,000× longer than the Query bar.</text>
+  </svg>
+  <figcaption>Figure 5.6 · At real sizes the difference is enormous. That's why API code never uses Scan.</figcaption>
+</figure>
+
+<h3>How the bill is counted (on-demand mode)</h3>
+<div class="tw"><table>
+  <tr><th>Unit</th><th>What one unit buys</th><th>Rough price</th></tr>
+  <tr><td>Read request unit (RRU)</td><td>One strongly consistent read of up to 4 KB, or <strong>two</strong> eventually consistent reads of up to 4 KB</td><td class="num">~$0.13–0.15 per million</td></tr>
+  <tr><td>Write request unit (WRU)</td><td>One write of up to 1 KB (bigger items use more units)</td><td class="num">~$0.63–0.71 per million</td></tr>
+  <tr><td>Storage</td><td>Data kept per month (the first 25 GB are free)</td><td class="num">~$0.25 per GB</td></tr>
+</table></div>
+<p class="muted">Prices are approximate list prices (us-east-1 low end, Mumbai a little higher). Check the DynamoDB pricing page for current numbers. A Query adds up the size of all items it reads and rounds up to the next 4 KB, so two 1 KB items cost one unit, or half a unit if eventually consistent.</p>
+
+<div class="tw"><table>
+  <tr><th>Example</th><th class="num">Reads</th><th class="num">Approx. cost</th></tr>
+  <tr><td>1,000 "list jobs" queries, 20 jobs each (~20 KB)</td><td class="num">~3,000 RRU</td><td class="num">$0.0004</td></tr>
+  <tr><td>1 Scan of 100,000 × 1 KB items</td><td class="num">~12,500 RRU</td><td class="num">$0.0017</td></tr>
+  <tr class="total"><td>The same Scan on every page view, 1 million views a month</td><td class="num">12.5 billion RRU</td><td class="num">≈ $1,600</td></tr>
+</table></div>
+
+<div class="box danger"><span class="label">Costs money</span>
+<p>A filter on a Scan does <strong>not</strong> save money. It only hides results <em>after</em> they have been read and paid for. One Scan in a popular API endpoint can turn a $1 bill into a four-figure one. Our code never calls <code>scan()</code>, but the permission <code>grantReadWriteData</code> gives the Lambda does allow it (Chapter 6).</p>
+</div>
+
+<h3>Technical terms</h3>
+<div class="tw"><table class="terms">
+  <tr><th>Term</th><th>Simple meaning</th><th>Example from our project</th></tr>
+  <tr><td>Scan</td><td>Read every item in the table</td><td>Lab command 4; never in API code</td></tr>
+  <tr><td>Filter expression</td><td>Throw away results after reading them</td><td><code>--filter-expression "begins_with(SK, :app)"</code></td></tr>
+  <tr><td>Count</td><td>Items handed back to you</td><td>2</td></tr>
+  <tr><td>ScannedCount</td><td>Items DynamoDB read (what you pay for)</td><td>2 for the Query, 4 for the Scan</td></tr>
+  <tr><td>RRU / WRU</td><td>The units on-demand billing counts</td><td>Creating one small job = 1 WRU, plus 1 for its GSI copy</td></tr>
+</table></div>
+</section>
+
+<!-- ================= 5.8 ================= -->
+<section id="s8">
+<h2><span class="n">5.8</span>Conditional writes and the overwrite trap</h2>
+<p class="lead"><code>put_item</code> means "save this item, replacing anything with the same key". It never warns you. A condition turns it into "save this only if…".</p>
+
+<div class="box simple"><span class="label">In simple words</span>
+<p>Imagine a locker room with no locks. If you put your bag in locker 7, and someone else puts their bag in locker 7, <strong>your bag silently disappears</strong>. A condition is a sticky note on the door: "only put a bag here if the locker is empty". If the locker is taken, you're told "no", and the first bag stays safe.</p>
+</div>
+
+<figure>
+  <svg viewBox="0 0 760 256" role="img" aria-label="Flowchart: put_item with condition attribute_not_exists(PK). If no item exists, save it; if one exists, ConditionalCheckFailedException and the old item is untouched">
+    <rect class="bx code" x="20" y="95" width="170" height="56" rx="10"/>
+    <text class="t" x="34" y="118">put_item</text><text class="s" x="34" y="136">PK=JOB#2, SK=META</text>
+    <path class="w" d="M190 123 H246" marker-end="url(#ar)"/>
+    <polygon class="bx warn" points="360,58 470,123 360,188 250,123"/>
+    <text class="t" x="304" y="118">Item with this</text><text class="t" x="304" y="136">key exists?</text>
+    <path class="w green" d="M470 123 H520 V60 H546" marker-end="url(#arg)"/><text class="lb" x="478" y="90">no</text>
+    <rect class="bx user" x="550" y="32" width="195" height="56" rx="10"/>
+    <text class="t" x="564" y="56">Saved ✓</text><text class="s" x="564" y="74">a new item is created</text>
+    <path class="w red" d="M470 123 H520 V186 H546" marker-end="url(#arr)"/><text class="lb" x="478" y="166">yes</text>
+    <rect class="bx bad" x="550" y="158" width="195" height="56" rx="10"/>
+    <text class="t" x="564" y="180">ConditionalCheckFailed</text><text class="s" x="564" y="198">nothing changed; old item safe</text>
+    <text class="s" x="20" y="226">Without a condition there is no diamond: put_item always overwrites.</text><text class="s" x="20" y="242">With ConditionExpression="attribute_not_exists(PK)" you get the check.</text>
+  </svg>
+  <figcaption>Figure 5.7 · A conditional create. The condition is checked and applied in one atomic step, so two writers can't both win.</figcaption>
+</figure>
+
+<div class="box tech"><span class="label">Technical view</span>
+<ul>
+  <li><code>attribute_not_exists(PK)</code> checks whether an item with <strong>this exact PK + SK</strong> already exists. It doesn't check other items in the folder.</li>
+  <li>The check and the write happen <strong>atomically</strong>: there's no gap where another writer could sneak in.</li>
+  <li>A failed condition still costs a write unit.</li>
+  <li><code>jobs.py</code> uses it in <code>create_job</code> as a safety net. A random UUID clash is extremely unlikely, but never overwriting is the right default.</li>
+  <li>In 2b you'll use the opposite, <code>attribute_exists(PK)</code>, so that updating a job that doesn't exist fails instead of quietly creating a half-empty item.</li>
+</ul>
+</div>
+
+<h3>Technical terms</h3>
+<div class="tw"><table class="terms">
+  <tr><th>Term</th><th>Simple meaning</th><th>Example from our project</th></tr>
+  <tr><td>Condition expression</td><td>"Only write if this is true"</td><td><code>attribute_not_exists(PK)</code></td></tr>
+  <tr><td>Atomic</td><td>Happens all at once, or not at all</td><td>The check and the save are one step</td></tr>
+  <tr><td>ConditionalCheckFailedException</td><td>"Your condition was false, so nothing changed"</td><td>Lab command 7</td></tr>
+  <tr><td>Upsert</td><td>Insert or overwrite (what a plain put does)</td><td>Lab command 6</td></tr>
+</table></div>
+</section>
+
+<!-- ================= 5.9 ================= -->
+<section id="s9">
+<h2><span class="n">5.9</span>Pagination</h2>
+<p class="lead">DynamoDB returns at most <code>Limit</code> items, plus a bookmark called <code>LastEvaluatedKey</code>. You send the bookmark back as <code>ExclusiveStartKey</code> to get the next page. Our API wraps the bookmark as an opaque <code>nextToken</code>.</p>
+
+<div class="box simple"><span class="label">In simple words</span>
+<p>Reading a long book one chapter at a time, you put a bookmark where you stopped. Next time you hand the bookmark back and say "continue from here". When there's no bookmark, the book is finished. A bookmark is better than "page 2", because if someone adds a page at the front while you're reading, "page 2" changes, but your bookmark still points to the exact spot.</p>
+</div>
+
+<figure>
+  <svg viewBox="0 0 760 370" role="img" aria-label="Sequence: client asks for limit 1, API queries DynamoDB, gets LastEvaluatedKey, returns nextToken; client sends nextToken back, API uses it as ExclusiveStartKey; repeats until nextToken is null">
+    <rect class="bx user" x="30" y="20" width="120" height="34" rx="8"/><text class="t" x="66" y="42">Client</text>
+    <rect class="bx code" x="320" y="20" width="120" height="34" rx="8"/><text class="t" x="340" y="42">API Lambda</text>
+    <rect class="bx aws" x="610" y="20" width="120" height="34" rx="8"/><text class="t" x="630" y="42">DynamoDB</text>
+    <line class="w dash" x1="90" y1="54" x2="90" y2="355"/><line class="w dash" x1="380" y1="54" x2="380" y2="355"/><line class="w dash" x1="670" y1="54" x2="670" y2="355"/>
+    <path class="w blue" d="M90 85 H376" marker-end="url(#arb)"/><text class="lb" x="100" y="78">1. GET /v1/jobs?limit=1</text>
+    <path class="w" d="M380 115 H666" marker-end="url(#ar)"/><text class="lb" x="390" y="108">2. Query GSI1, Limit=1</text>
+    <path class="w green" d="M670 150 H384" marker-end="url(#arg)"/><text class="lb" x="390" y="143">3. [React Dev] + LastEvaluatedKey {...}</text>
+    <path class="w green" d="M380 185 H94" marker-end="url(#arg)"/><text class="lb" x="100" y="178">4. items + nextToken "eyJQSyI6..."</text>
+    <path class="w blue" d="M90 225 H376" marker-end="url(#arb)"/><text class="lb" x="100" y="218">5. GET ?limit=1&amp;nextToken=eyJ...</text>
+    <path class="w" d="M380 255 H666" marker-end="url(#ar)"/><text class="lb" x="390" y="248">6. Query, ExclusiveStartKey={...}</text>
+    <path class="w green" d="M670 290 H384" marker-end="url(#arg)"/><text class="lb" x="390" y="283">7. [Odoo Dev] + LastEvaluatedKey?</text>
+    <path class="w green" d="M380 330 H94" marker-end="url(#arg)"/><text class="lb" x="100" y="323">8. ...last page: nextToken = null</text>
+  </svg>
+  <figcaption>Figure 5.8 · How a page bookmark travels. The client never sees the raw key; it gets a base64 string.</figcaption>
+</figure>
+
+<div class="box tech"><span class="label">Technical view</span>
+<ul>
+  <li><code>LastEvaluatedKey</code> is the key of the last item read, e.g. <code>{"PK": "JOB#…", "SK": "META", "GSI1PK": "JOB", "GSI1SK": "2026-…#…"}</code>.</li>
+  <li><code>encode_token()</code> turns it into JSON and then <strong>URL-safe base64</strong>, so it fits in a query string. <code>decode_token()</code> reverses it, and a garbage token returns <code>400 BAD_REQUEST</code>.</li>
+  <li>A page can contain <strong>fewer</strong> than <code>Limit</code> items and still have a next page. Always loop until there's no token.</li>
+  <li>If the last page is exactly full, DynamoDB may still return a <code>LastEvaluatedKey</code>, and the following page comes back empty with <code>nextToken: null</code>. That's normal.</li>
+  <li>Each Query also stops at <strong>1 MB</strong> of data read, even if <code>Limit</code> isn't reached.</li>
+</ul>
+</div>
+
+<div class="box warn"><span class="label">Watch out</span>
+<p>base64 is <strong>encoding</strong>, not encryption. Anyone can decode a <code>nextToken</code> and see your key layout. "Opaque" means "please don't depend on what's inside", not "secret". Never put private data in a key.</p>
+</div>
+
+<h3>Technical terms</h3>
+<div class="tw"><table class="terms">
+  <tr><th>Term</th><th>Simple meaning</th><th>Example from our project</th></tr>
+  <tr><td>Limit</td><td>Max items per page</td><td><code>?limit=20</code> (1–100 allowed)</td></tr>
+  <tr><td>LastEvaluatedKey</td><td>DynamoDB's bookmark</td><td>Returned when more pages exist</td></tr>
+  <tr><td>ExclusiveStartKey</td><td>"Start after this bookmark"</td><td>Set from the decoded <code>nextToken</code></td></tr>
+  <tr><td>nextToken</td><td>Our wrapped bookmark for clients</td><td><code>"eyJQSyI6ICJKT0Ij..."</code></td></tr>
+  <tr><td>Opaque token</td><td>A string clients pass back without reading</td><td>The UI just stores it and sends it back</td></tr>
+  <tr><td>base64 (URL-safe)</td><td>A way to write any data as safe letters</td><td><code>base64.urlsafe_b64encode</code></td></tr>
+</table></div>
+</section>
+
+<!-- ================= 5.10 ================= -->
+<section id="s10">
+<h2><span class="n">5.10</span>Eventual vs strong consistency</h2>
+<p class="lead">DynamoDB keeps three copies of your data. A write lands on one copy first and reaches the others a few milliseconds later. An "eventually consistent" read may hit a copy that hasn't caught up yet.</p>
+
+<div class="box simple"><span class="label">In simple words</span>
+<p>A teacher writes the homework on the main board, and a helper copies it onto two side boards a moment later. If you glance at a side board during that moment, you might see yesterday's homework. Ask the teacher directly (a strong read) and you always see today's. It takes a bit more effort, so it costs double.</p>
+</div>
+
+<figure>
+  <svg viewBox="0 0 760 220" role="img" aria-label="A write goes to the leader copy, then replicates to two other copies; strong reads go to the leader, eventual reads may hit a lagging copy">
+    <rect class="bx code" x="20" y="85" width="130" height="50" rx="8"/><text class="t" x="34" y="108">PutItem</text><text class="s" x="34" y="124">write a job</text>
+    <path class="w blue" d="M150 110 H236" marker-end="url(#arb)"/>
+    <rect class="bx aws" x="240" y="85" width="150" height="50" rx="8"/><text class="t" x="254" y="108">Copy 1 (leader)</text><text class="s" x="254" y="124">always up to date</text>
+    <path class="w dash" d="M390 100 C430 100 430 45 466 45" marker-end="url(#ar)"/>
+    <path class="w dash" d="M390 120 C430 120 430 175 466 175" marker-end="url(#ar)"/>
+    <text class="lb" x="400" y="115">a few ms</text>
+    <rect class="bx" x="470" y="20" width="150" height="50" rx="8"/><text class="t" x="484" y="43">Copy 2</text><text class="s" x="484" y="59">may lag briefly</text>
+    <rect class="bx" x="470" y="150" width="150" height="50" rx="8"/><text class="t" x="484" y="173">Copy 3</text><text class="s" x="484" y="189">may lag briefly</text>
+    <text class="t" x="640" y="40">Eventual read</text><text class="s" x="640" y="58">any copy · half price</text>
+    <text class="t" x="640" y="170">GSI reads</text><text class="s" x="640" y="188">always eventual</text>
+    <text class="t" x="240" y="168">Strong read</text><text class="s" x="240" y="186">leader only · full price</text>
+  </svg>
+  <figcaption>Figure 5.9 · Eventual reads are cheaper and almost always fresh. Strong reads are guaranteed fresh but cost double, and GSIs don't offer them.</figcaption>
+</figure>
+
+<div class="tw"><table>
+  <tr><th></th><th>Eventually consistent (default)</th><th>Strongly consistent</th></tr>
+  <tr><td>How to ask</td><td>Default</td><td><code>ConsistentRead=True</code> / <code>--consistent-read</code></td></tr>
+  <tr><td>Cost</td><td>½ unit per 4 KB</td><td>1 unit per 4 KB</td></tr>
+  <tr><td>Freshness</td><td>Usually fresh within ~1 second</td><td>Always the latest write</td></tr>
+  <tr><td>Available on GSIs?</td><td>Yes (the only option)</td><td><strong>No</strong></td></tr>
+</table></div>
+
+<div class="box tech"><span class="label">What this means for TalentMatch</span>
+<p>If a recruiter creates a job and the list refreshes in the same millisecond, the new job might be missing for a moment, because the list reads GSI1 and GSI reads are eventual. That's acceptable for an HR tool. In Sprint 2c's UI work, we'll add the newly created job to the list on the screen straight from the <code>POST</code> response, so the user never notices.</p>
+</div>
+
+<h3>Technical terms</h3>
+<div class="tw"><table class="terms">
+  <tr><th>Term</th><th>Simple meaning</th><th>Example from our project</th></tr>
+  <tr><td>Replica</td><td>A copy of the data on another server</td><td>DynamoDB keeps 3, across availability zones</td></tr>
+  <tr><td>Eventually consistent</td><td>Fresh "very soon"</td><td>Every <code>list_jobs</code> call (GSI1)</td></tr>
+  <tr><td>Strongly consistent</td><td>Fresh "right now", at double cost</td><td>Could be used in <code>get_job</code></td></tr>
+</table></div>
+</section>
+
+<!-- ================= 5.11 ================= -->
+<section id="s11">
+<h2><span class="n">5.11</span>Limits: hot partitions, item size, billing modes</h2>
+<p class="lead">Three limits shape our design. Each partition has a speed limit, an item can't be bigger than 400 KB, and you choose how you're billed.</p>
+
+<h3>Hot partitions</h3>
+<div class="box simple"><span class="label">In simple words</span>
+<p>A school has ten doors, but everybody uses door 1 because it's labelled "JOB". At home time there's a queue at door 1 and nobody at doors 2–10. That door is a <strong>hot partition</strong>. Fix it by labelling doors "JOB-0" to "JOB-9" and spreading people out.</p>
+</div>
+
+<figure>
+  <svg viewBox="0 0 760 230" role="img" aria-label="Left: all writes go to one partition GSI1PK=JOB which overloads. Right: writes spread across JOB#0..JOB#3 shards">
+    <text class="gt" x="20" y="22">Today: one value for every job</text>
+    <rect class="bx user" x="20" y="40" width="70" height="28" rx="6"/><text class="s" x="32" y="58">write</text>
+    <rect class="bx user" x="20" y="78" width="70" height="28" rx="6"/><text class="s" x="32" y="96">write</text>
+    <rect class="bx user" x="20" y="116" width="70" height="28" rx="6"/><text class="s" x="32" y="134">write</text>
+    <rect class="bx user" x="20" y="154" width="70" height="28" rx="6"/><text class="s" x="32" y="172">write</text>
+    <path class="w red" d="M90 54 L176 105" marker-end="url(#arr)"/><path class="w red" d="M90 92 L176 108" marker-end="url(#arr)"/>
+    <path class="w red" d="M90 130 L176 112" marker-end="url(#arr)"/><path class="w red" d="M90 168 L176 116" marker-end="url(#arr)"/>
+    <rect class="bx bad" x="180" y="80" width="160" height="62" rx="10"/>
+    <text class="t" x="194" y="104">GSI1PK = JOB</text><text class="s" x="194" y="122">~1,000 writes/s max</text>
+    <text class="s" x="20" y="212">Fine for 1,000 jobs; throttles at millions of writes per second.</text>
+    <line class="w" x1="380" y1="30" x2="380" y2="215"/>
+    <text class="gt" x="400" y="22">At huge scale: shard the key</text>
+    <rect class="bx user" x="400" y="40" width="70" height="28" rx="6"/><text class="s" x="412" y="58">write</text>
+    <rect class="bx user" x="400" y="78" width="70" height="28" rx="6"/><text class="s" x="412" y="96">write</text>
+    <rect class="bx user" x="400" y="116" width="70" height="28" rx="6"/><text class="s" x="412" y="134">write</text>
+    <rect class="bx user" x="400" y="154" width="70" height="28" rx="6"/><text class="s" x="412" y="172">write</text>
+    <path class="w green" d="M470 54 H556" marker-end="url(#arg)"/><path class="w green" d="M470 92 H556" marker-end="url(#arg)"/>
+    <path class="w green" d="M470 130 H556" marker-end="url(#arg)"/><path class="w green" d="M470 168 H556" marker-end="url(#arg)"/>
+    <rect class="bx aws" x="560" y="40" width="180" height="28" rx="6"/><text class="m" x="572" y="58">GSI1PK = JOB#0</text>
+    <rect class="bx aws" x="560" y="78" width="180" height="28" rx="6"/><text class="m" x="572" y="96">GSI1PK = JOB#1</text>
+    <rect class="bx aws" x="560" y="116" width="180" height="28" rx="6"/><text class="m" x="572" y="134">GSI1PK = JOB#2</text>
+    <rect class="bx aws" x="560" y="154" width="180" height="28" rx="6"/><text class="m" x="572" y="172">GSI1PK = JOB#3</text>
+    <text class="s" x="400" y="212">Readers query all 4 shards and merge. More work, but no queue.</text>
+  </svg>
+  <figcaption>Figure 5.10 · A hot partition (left) and write sharding (right). For our HR tool, the left side is the right choice.</figcaption>
+</figure>
+
+<div class="box tech"><span class="label">Technical view</span>
+<p>Each partition handles roughly <strong>3,000 read units and 1,000 write units per second</strong>. Every job shares <code>GSI1PK = "JOB"</code>, so all job writes land on one GSI partition. A company creates maybe a few jobs a day, about a million times below the limit, so the simple design wins. Only a platform with millions of job writes per second would need sharding (<code>JOB#0</code>…<code>JOB#9</code>) or time buckets (<code>JOB#2026-10</code>).</p>
+</div>
+
+<h3>The 400 KB item limit</h3>
+<p>One item, all attributes included, can be at most <strong>400 KB</strong>. Our job description is capped at 20,000 characters, around 20–80 KB depending on the characters, so jobs fit easily. Resumes are PDF files of up to 5 MB, so they <strong>don't</strong> go in DynamoDB. They go in S3 (Sprint 5), and the DynamoDB item stores only the S3 key.</p>
+
+<h3>On-demand vs provisioned</h3>
+<div class="tw"><table>
+  <tr><th></th><th>On-demand (our choice)</th><th>Provisioned</th></tr>
+  <tr><td>You decide</td><td>Nothing; it scales instantly</td><td>Reads and writes per second, in advance</td></tr>
+  <tr><td>Idle cost</td><td><strong>$0</strong> (storage only)</td><td>You pay for the capacity even when idle</td></tr>
+  <tr><td>Busy cost</td><td>Higher per request</td><td>Cheaper per request if traffic is steady</td></tr>
+  <tr><td>Best for</td><td>New, spiky or small apps (TalentMatch)</td><td>Big, predictable, 24/7 traffic</td></tr>
+  <tr><td>CDK</td><td><code>billing: Billing.onDemand()</code></td><td><code>Billing.provisioned({...})</code></td></tr>
+</table></div>
+
+<h3>Technical terms</h3>
+<div class="tw"><table class="terms">
+  <tr><th>Term</th><th>Simple meaning</th><th>Example from our project</th></tr>
+  <tr><td>Hot partition</td><td>One busy folder slowing everyone down</td><td>Would be <code>GSI1PK = "JOB"</code> at massive scale</td></tr>
+  <tr><td>Throttling</td><td>"Too fast, try again"</td><td><code>ProvisionedThroughputExceededException</code></td></tr>
+  <tr><td>Write sharding</td><td>Splitting one hot key into several</td><td><code>JOB#0</code>…<code>JOB#9</code></td></tr>
+  <tr><td>On-demand</td><td>Pay per request, no planning</td><td>Our table</td></tr>
+  <tr><td>Provisioned</td><td>Reserve speed in advance</td><td>Not used in TalentMatch</td></tr>
+</table></div>
+</section>
+
+<!-- ================= 5.12 ================= -->
+<section id="s12">
+<h2><span class="n">5.12</span>The lab: a throwaway table</h2>
+<p class="lead">Before writing any code, you created a table called <code>lab-s2</code> with the CLI and felt every rule above for yourself. It cost nothing and took 10 minutes.</p>
+
+<ol class="steps">
+  <li><strong>Check you're logged in.</strong>
+<pre class="term"><span class="p">$ </span>aws sts get-caller-identity
+<span class="o">{ "Account": "143495498376", "Arn": "arn:aws:iam::143495498376:user/jaimin-admin" }</span></pre></li>
+
+  <li><strong>Command 1: create the table</strong> with only PK and SK, on-demand.
+<pre class="term"><span class="p">$ </span>aws dynamodb create-table --table-name lab-s2 \
+    --attribute-definitions AttributeName=PK,AttributeType=S AttributeName=SK,AttributeType=S \
+    --key-schema AttributeName=PK,KeyType=HASH AttributeName=SK,KeyType=RANGE \
+    --billing-mode PAY_PER_REQUEST
+<span class="o">{ "TableDescription": { "TableName": "lab-s2", "TableStatus": "CREATING", ... } }</span>
+<span class="p">$ </span>aws dynamodb wait table-exists --table-name lab-s2
+<span class="c"># waits silently until the status is ACTIVE</span></pre>
+  <p><strong>Notice:</strong> <code>HASH</code> = PK and <code>RANGE</code> = SK. <code>PAY_PER_REQUEST</code> = on-demand, so there's no idle cost.</p></li>
+
+  <li><strong>Command 2: add one job, two applications and a second job.</strong>
+<pre class="term"><span class="p">$ </span>aws dynamodb put-item --table-name lab-s2 --item '{"PK":{"S":"JOB#1"},"SK":{"S":"META"},"title":{"S":"Odoo Developer"}}'
+<span class="p">$ </span>aws dynamodb put-item --table-name lab-s2 --item '{"PK":{"S":"JOB#1"},"SK":{"S":"APP#cand-a"},"score":{"N":"90"}}'
+<span class="p">$ </span>aws dynamodb put-item --table-name lab-s2 --item '{"PK":{"S":"JOB#1"},"SK":{"S":"APP#cand-b"},"score":{"N":"49"}}'
+<span class="p">$ </span>aws dynamodb put-item --table-name lab-s2 --item '{"PK":{"S":"JOB#2"},"SK":{"S":"META"},"title":{"S":"React Developer"}}'
+<span class="c"># each prints nothing on success</span></pre>
+  <p><strong>Notice:</strong> every value carries its type (<code>S</code>, <code>N</code>), and the job and application items have different attributes. That's schemaless.</p></li>
+
+  <li><strong>Command 3: Query</strong> access pattern #3, all applicants for job 1.
+<pre class="term"><span class="p">$ </span>aws dynamodb query --table-name lab-s2 \
+    --key-condition-expression "PK = :pk AND begins_with(SK, :app)" \
+    --expression-attribute-values '{":pk":{"S":"JOB#1"},":app":{"S":"APP#"}}'
+<span class="o">{ "Items": [ {...APP#cand-a...}, {...APP#cand-b...} ],
+  "Count": 2,
+  "ScannedCount": 2 }</span></pre></li>
+
+  <li><strong>Command 4: Scan</strong> the same question the expensive way.
+<pre class="term"><span class="p">$ </span>aws dynamodb scan --table-name lab-s2 --filter-expression "begins_with(SK, :app)" \
+    --expression-attribute-values '{":app":{"S":"APP#"}}'
+<span class="o">{ "Items": [ ...same 2 items... ],
+  "Count": 2,
+  "ScannedCount": 4 }</span></pre>
+  <p><strong>Notice:</strong> <code>ScannedCount: 4</code>. All four items were read and paid for, and two were thrown away.</p></li>
+
+  <li><strong>Command 5: try to query without an exact PK.</strong>
+<pre class="term"><span class="p">$ </span>aws dynamodb query --table-name lab-s2 \
+    --key-condition-expression "begins_with(PK, :j)" \
+    --expression-attribute-values '{":j":{"S":"JOB#"}}'
+<span class="o">An error occurred (ValidationException) when calling the Query operation:
+Query key condition not supported</span></pre>
+  <p><strong>Notice:</strong> PKs are hashed (Figure 5.2), so Query refuses.</p></li>
+
+  <li><strong>Command 6: the overwrite trap.</strong>
+<pre class="term"><span class="p">$ </span>aws dynamodb put-item --table-name lab-s2 --item '{"PK":{"S":"JOB#2"},"SK":{"S":"META"},"title":{"S":"OOPS"}}'
+<span class="p">$ </span>aws dynamodb get-item --table-name lab-s2 --key '{"PK":{"S":"JOB#2"},"SK":{"S":"META"}}'
+<span class="o">{ "Item": { "PK": {"S": "JOB#2"}, "SK": {"S": "META"}, "title": {"S": "OOPS"} } }</span>
+<span class="c"># React Developer is gone, with no warning</span></pre></li>
+
+  <li><strong>Command 7: the same put, with a condition.</strong>
+<pre class="term"><span class="p">$ </span>aws dynamodb put-item --table-name lab-s2 \
+    --item '{"PK":{"S":"JOB#2"},"SK":{"S":"META"},"title":{"S":"OOPS again"}}' \
+    --condition-expression "attribute_not_exists(PK)"
+<span class="o">An error occurred (ConditionalCheckFailedException) when calling the PutItem operation:
+The conditional request failed</span>
+<span class="c"># nothing changed; "OOPS" is still there</span></pre></li>
+
+  <li><strong>Command 8: clean up</strong> (lab rule: delete the same day).
+<pre class="term"><span class="p">$ </span>aws dynamodb delete-table --table-name lab-s2
+<span class="p">$ </span>aws dynamodb list-tables
+<span class="o">{ "TableNames": [ "TalentMatch-dev-Table…" ] }</span>  <span class="c"># or [] if dev is destroyed</span></pre></li>
+</ol>
+
+<div class="box warn"><span class="label">Watch out: quoting in zsh</span>
+<p>The JSON is inside <strong>single quotes</strong> so that zsh doesn't touch the <code>"</code>, <code>{</code> or <code>#</code> characters. If you get <code>Error parsing parameter</code>, a quote is usually missing or curly.</p>
+</div>
+</section>
+
+<!-- ================= 5.13 ================= -->
+<section id="s13">
+<h2><span class="n">5.13</span>Your answers and the corrections</h2>
+<p class="lead">You answered two rounds of quiz questions while learning this. Here they are, with what was right and what needed sharpening.</p>
+
+<h3>Round 1: after the lab</h3>
+<div class="tw"><table>
+  <tr><th>Question</th><th>Your answer</th><th>Correction</th></tr>
+  <tr><td>Count vs ScannedCount, and which do you pay for?</td><td>"Count is 2, ScannedCount is 3. I don't get which one I pay for."</td><td>The Scan's <code>ScannedCount</code> is <strong>4</strong> (the table had 2 jobs + 2 applications). You pay for <strong>ScannedCount</strong>, what was read.</td></tr>
+  <tr><td>Why did command 5 fail?</td><td>"I don't know."</td><td>PKs are hashed and scattered, so only an exact <code>PK =</code> is allowed: <code>ValidationException</code>.</td></tr>
+  <tr><td>What happened in commands 6 and 7?</td><td>"I don't know."</td><td>6 silently overwrote React Developer. 7's condition refused the write with <code>ConditionalCheckFailedException</code>, and nothing changed.</td></tr>
+</table></div>
+
+<h3>Round 2: the quick check</h3>
+<div class="tw"><table>
+  <tr><th>Question</th><th>Your answer</th><th>Verdict</th></tr>
+  <tr><td>A Scan reads 10,000 and returns 5. What do you pay for?</td><td>"For 10k items I need to pay."</td><td>✅ Correct.</td></tr>
+  <tr><td>Query "PK starts with JOB#"?</td><td>"I need to add the exact name like JOB#1."</td><td>✅ Half. Also: <strong>to list all jobs</strong>, give every job <code>GSI1PK = "JOB"</code> and query GSI1 exactly.</td></tr>
+  <tr><td>What does <code>attribute_not_exists(PK)</code> protect against?</td><td>"If PK and SK match but the other condition fails, it won't update and gives an error."</td><td>✅ Close. Precisely: "save only if <strong>no item with this PK+SK exists</strong>", which protects you from <strong>overwriting</strong>.</td></tr>
+  <tr><td>Why does <code>get_job</code> use get_item and <code>list_jobs</code> use query?</td><td>"get_item for one job, query for list."</td><td>✅ Right. get_item needs the full key and returns 0 or 1 items; query needs an exact PK and returns many.</td></tr>
+</table></div>
+
+<div class="box story"><span class="label">Real story from our build</span>
+<p>Your first <code>jobs.py</code> used <code>GSI1SK = "JOB#&lt;uuid&gt;"</code>. A UUID is random, so "newest first" came back in <strong>random order</strong>. The fix was to put the time first: <code>GSI1SK = f"{now}#{job_id}"</code>. The test <code>test_list_pagination_newest_first</code> exists to catch exactly this.</p>
+</div>
+</section>
+
+<!-- ================= 5.14 ================= -->
+<section id="s14">
+<h2><span class="n">5.14</span>Explore more</h2>
+<p class="lead">Things we haven't done yet that will deepen your understanding. Each takes under 5 minutes, and all are free at this size. Run them while <code>TalentMatch-dev</code> is deployed and has a few jobs.</p>
+
+<div class="box explore"><span class="label">Explore more</span>
+<ul class="check">
+  <li><strong>See the real cost of a read.</strong> Add <code>--return-consumed-capacity TOTAL</code> to a query and compare a GetItem, a Query and a Scan:
+<pre class="term"><span class="p">$ </span>TABLE=$(aws cloudformation describe-stacks --stack-name TalentMatch-dev \
+    --query "Stacks[0].Outputs[?OutputKey=='TableName'].OutputValue" --output text)
+<span class="p">$ </span>aws dynamodb query --table-name $TABLE --index-name GSI1 \
+    --key-condition-expression "GSI1PK = :j" --expression-attribute-values '{":j":{"S":"JOB"}}' \
+    --return-consumed-capacity TOTAL --query ConsumedCapacity
+<span class="o">{ "TableName": "TalentMatch-dev-...", "CapacityUnits": 0.5 }</span></pre></li>
+  <li><strong>Strong vs eventual.</strong> Run a <code>get-item</code> with and without <code>--consistent-read</code> and <code>--return-consumed-capacity TOTAL</code>. The strong read shows double the units (1.0 vs 0.5). Then try <code>--consistent-read</code> on the GSI1 query and read the error.</li>
+  <li><strong>The console item editor.</strong> DynamoDB → Tables → your table → Explore table items → open a job → <em>JSON view</em>. Switch "View DynamoDB JSON" on and off to see the <code>{"S": …}</code> wrappers that boto3 hides.</li>
+  <li><strong>PartiQL (SQL-like syntax).</strong> Console → PartiQL editor: <code>SELECT * FROM "TalentMatch-dev-Table…" WHERE PK = 'JOB#…'</code>. Then try <code>WHERE title = 'Odoo Developer'</code> and notice that it becomes a <strong>Scan</strong>, because <code>title</code> isn't a key.</li>
+  <li><strong>CloudWatch metrics.</strong> Table → <em>Monitor</em> tab: ConsumedReadCapacityUnits, ConsumedWriteCapacityUnits and ThrottledRequests. Create 5 jobs with curl and watch the write graph move (it can take a minute or two).</li>
+  <li><strong>Prove the sparse index.</strong> In the console, add a new item <code>PK=TEST#1, SK=META</code> with no <code>GSI1PK</code>. Call <code>GET /v1/jobs</code>. It isn't listed. Add <code>GSI1PK = JOB</code> and <code>GSI1SK = 2099-01-01#x</code> and it appears at the top. Delete it afterwards.</li>
+  <li><strong>Decode a nextToken.</strong> <code>echo '&lt;token&gt;' | base64 -d</code> (add <code>=</code> padding if it complains). You'll see your keys in plain JSON. That's why "opaque" doesn't mean "secret".</li>
+  <li><strong>Table settings.</strong> Table → <em>Additional settings</em>: find point-in-time recovery (off now; Sprint 14 turns it on), deletion protection, and the table class.</li>
+</ul>
+</div>
+</section>
+
+<!-- ================= Q&A ================= -->
+<section id="qa">
+<h2><span class="n">5.15</span>Check yourself</h2>
+<p>Try to answer in your head first, then click to reveal.</p>
+<div class="qa-list">
+  <details class="qa"><summary>What two parts make up a DynamoDB primary key here, and which must be unique?</summary><div class="a">The partition key (PK) and the sort key (SK). The <strong>combination</strong> PK + SK must be unique. Many items can share a PK (an item collection), as long as their SKs differ.</div></details>
+  <details class="qa"><summary>Why can't a Query use begins_with on the partition key?</summary><div class="a">PKs are hashed to choose a partition, so similar names are scattered across servers. Finding "all PKs starting with JOB#" would mean reading every partition, which is a Scan. Query only allows <code>PK = value</code>.</div></details>
+  <details class="qa"><summary>A Scan reads 10,000 items and returns 5. How many do you pay for?</summary><div class="a">All 10,000. You pay for <code>ScannedCount</code>, what was read. The filter only removes items after they've been read.</div></details>
+  <details class="qa"><summary>How does TalentMatch list all jobs if a PK must be exact?</summary><div class="a">Every job gets <code>GSI1PK = "JOB"</code> and <code>GSI1SK = "&lt;createdAt&gt;#&lt;id&gt;"</code>. <code>list_jobs</code> queries index GSI1 with <code>GSI1PK = "JOB"</code> (an exact match) and <code>ScanIndexForward=False</code> for newest first.</div></details>
+  <details class="qa"><summary>What is a sparse index, and what happens if a job is saved without GSI1PK?</summary><div class="a">A GSI only contains items that have its key attributes. A job without <code>GSI1PK</code> is still in the main table (<code>get_job</code> finds it) but is never copied into GSI1, so "list jobs" doesn't show it.</div></details>
+  <details class="qa"><summary>What does index overloading mean? Give our example.</summary><div class="a">Using one index for several item types and questions. GSI1 holds jobs under <code>GSI1PK = "JOB"</code> and, from Sprint 5, applications under <code>GSI1PK = CAND#&lt;id&gt;</code>, for "all jobs this candidate applied to".</div></details>
+  <details class="qa"><summary>Why must GSI1SK start with the timestamp rather than the job ID?</summary><div class="a">The sort key sets the order. ISO timestamps sort alphabetically in time order; random UUIDs don't. With the time first, the index is in creation order, and reversing it gives newest first. The <code>#id</code> on the end keeps it unique.</div></details>
+  <details class="qa"><summary>What does put_item do if an item with the same key already exists, and how do we stop that?</summary><div class="a">It silently replaces it. Adding <code>ConditionExpression="attribute_not_exists(PK)"</code> makes DynamoDB refuse with <code>ConditionalCheckFailedException</code> if the key is taken. The check and the write are atomic.</div></details>
+  <details class="qa"><summary>Why does our API return a nextToken instead of ?page=2?</summary><div class="a">DynamoDB has no page numbers. It continues from a key, using LastEvaluatedKey and ExclusiveStartKey. A bookmark also stays correct when new jobs are added at the front, whereas "page 2" would shift. Wrapping the key in an opaque token hides our key layout from clients.</div></details>
+  <details class="qa"><summary>When does the list end?</summary><div class="a">When DynamoDB returns no <code>LastEvaluatedKey</code>, so our API returns <code>nextToken: null</code>. A page can have fewer items than the limit and still have a next page, so clients should check the token, not the count.</div></details>
+  <details class="qa"><summary>Can a GSI query be strongly consistent? What does that mean for "create then list"?</summary><div class="a">No. GSI reads are always eventually consistent. A job created a millisecond ago might be missing from the list briefly. The UI handles this by adding the new job from the POST response.</div></details>
+  <details class="qa"><summary>Why is GSI1PK = "JOB" fine for us but a problem at huge scale?</summary><div class="a">All jobs share one GSI partition, which handles roughly 1,000 writes per second. A company writing a few jobs a day is nowhere near that. Millions of writes per second would throttle, and you'd shard the key (<code>JOB#0</code>…<code>JOB#9</code>) or bucket it by month.</div></details>
+  <details class="qa"><summary>Why are resumes stored in S3 and not in DynamoDB?</summary><div class="a">A DynamoDB item can be at most 400 KB, and resumes can be up to 5 MB. S3 also costs much less per GB. The DynamoDB item stores only the resume's S3 key and the extracted profile.</div></details>
+  <details class="qa"><summary>Why does the plan use on-demand instead of provisioned capacity?</summary><div class="a">On-demand costs nothing while idle and scales instantly with no planning, which suits a new, spiky POC under a $15 budget. Provisioned is cheaper only for steady, predictable, high traffic, and it charges even when idle.</div></details>
+</div>
+</section>
+
+<nav class="pager" aria-label="Previous and next chapter">
+  <a class="prev" href="04-hosting-the-ui-s3-cloudfront.html"><small>← Previous</small>4 · Hosting the UI</a>
+  <a class="next" href="06-building-the-jobs-api.html"><small>Next →</small>6 · Building the Jobs API</a>
+</nav>
+</main>
+</body>
+</html>

@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TalentMatch Learning Book</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  .chapters { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; margin: 18px 0; }
+  .chapters a { display: block; text-decoration: none; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; }
+  .chapters a:hover { border-color: var(--blue); }
+  .chapters .no { font: 800 28px/1 var(--body); color: var(--blue); }
+  .chapters h3 { margin: 8px 0 4px; font-size: 17px; }
+  .chapters p { margin: 0; font-size: 14px; color: var(--muted); }
+  .chapters .tags { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 4px; }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+  <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah" d="M0,0 L10,5 L0,10 z"/></marker>
+</defs></svg>
+
+<nav class="topbar" aria-label="Chapters"><div class="in">
+  <a class="home here" href="index.html">TalentMatch book</a>
+  <a href="00-plan-and-design.html">0 Plan</a>
+  <a href="01-aws-basics-and-account-setup.html">1 AWS</a>
+  <a href="02-infrastructure-as-code-with-cdk.html">2 CDK</a>
+  <a href="03-lambda-and-the-health-api.html">3 Lambda</a>
+  <a href="04-hosting-the-ui-s3-cloudfront.html">4 UI hosting</a>
+  <a href="05-dynamodb-explained.html">5 DynamoDB</a>
+  <a href="06-building-the-jobs-api.html">6 Jobs API</a>
+  <a href="07-testing-debugging-and-habits.html">7 Debugging</a>
+</div></nav>
+
+<main>
+<header class="hero">
+  <div class="kicker">Your learning book · Sprints 0 to 2a</div>
+  <h1>Learning AWS serverless by building TalentMatch</h1>
+  <p class="sub">Everything we have built and learned so far, explained step by step: simple words first, then the real technical terms, with diagrams, commands to try, the bugs we hit, and questions to check yourself.</p>
+</header>
+
+<h2><span class="n">→</span>Read in this order</h2>
+<figure>
+  <svg viewBox="0 0 900 120" role="img" aria-label="Reading path from chapter 0 to chapter 7">
+    <rect class="bx user" x="6" y="30" width="96" height="56" rx="8"/><text class="t" x="18" y="54">0 Plan</text><text class="s" x="18" y="72">big picture</text>
+    <path class="w" d="M102 58 H116" marker-end="url(#ar)"/>
+    <rect class="bx aws" x="118" y="30" width="96" height="56" rx="8"/><text class="t" x="130" y="54">1 AWS</text><text class="s" x="130" y="72">account</text>
+    <path class="w" d="M214 58 H228" marker-end="url(#ar)"/>
+    <rect class="bx aws" x="230" y="30" width="96" height="56" rx="8"/><text class="t" x="242" y="54">2 CDK</text><text class="s" x="242" y="72">infra as code</text>
+    <path class="w" d="M326 58 H340" marker-end="url(#ar)"/>
+    <rect class="bx code" x="342" y="30" width="96" height="56" rx="8"/><text class="t" x="354" y="54">3 Lambda</text><text class="s" x="354" y="72">health API</text>
+    <path class="w" d="M438 58 H452" marker-end="url(#ar)"/>
+    <rect class="bx code" x="454" y="30" width="96" height="56" rx="8"/><text class="t" x="466" y="54">4 UI</text><text class="s" x="466" y="72">S3, CloudFront</text>
+    <path class="w" d="M550 58 H564" marker-end="url(#ar)"/>
+    <rect class="bx data" x="566" y="30" width="96" height="56" rx="8"/><text class="t" x="578" y="54">5 DynamoDB</text><text class="s" x="578" y="72">theory + lab</text>
+    <path class="w" d="M662 58 H676" marker-end="url(#ar)"/>
+    <rect class="bx data" x="678" y="30" width="96" height="56" rx="8"/><text class="t" x="690" y="54">6 Jobs API</text><text class="s" x="690" y="72">build + test</text>
+    <path class="w" d="M774 58 H788" marker-end="url(#ar)"/>
+    <rect class="bx warn" x="790" y="30" width="104" height="56" rx="8"/><text class="t" x="802" y="54">7 Debugging</text><text class="s" x="802" y="72">habits, glossary</text>
+  </svg>
+  <figcaption>Each chapter builds on the one before. Chapter 7 also works as a reference you can come back to anytime.</figcaption>
+</figure>
+
+<div class="chapters">
+  <a href="00-plan-and-design.html"><div class="no">0</div><h3>The plan and the design</h3><p>What TalentMatch is, the full architecture, the resume journey, scoring, the 16 sprints, decisions, cost and where we are now.</p><div class="tags"><span class="pill">overview</span><span class="pill">architecture</span></div></a>
+  <a href="01-aws-basics-and-account-setup.html"><div class="no">1</div><h3>AWS basics and account setup</h3><p>Regions, IAM, root vs users vs roles, policies, budgets, CloudTrail, the CLI and <code>aws login</code>.</p><div class="tags"><span class="pill">Sprint 0</span><span class="pill">IAM</span></div></a>
+  <a href="02-infrastructure-as-code-with-cdk.html"><div class="no">2</div><h3>Infrastructure as code with CDK</h3><p>CloudFormation, CDK apps/stacks/constructs, bin vs lib, bootstrap, synth/diff/deploy/destroy.</p><div class="tags"><span class="pill">Sprint 0–1</span><span class="pill">CDK</span></div></a>
+  <a href="03-lambda-and-the-health-api.html"><div class="no">3</div><h3>Lambda and the health API</h3><p>Serverless functions, cold starts, handlers, logs, API Gateway routes and the request journey.</p><div class="tags"><span class="pill">Sprint 1</span><span class="pill">Lambda</span><span class="pill">API Gateway</span></div></a>
+  <a href="04-hosting-the-ui-s3-cloudfront.html"><div class="no">4</div><h3>Hosting the UI: S3 and CloudFront</h3><p>Private buckets, CDN, OAC, SPA fallback, CORS and the generated config.json.</p><div class="tags"><span class="pill">Sprint 1</span><span class="pill">S3</span><span class="pill">CloudFront</span></div></a>
+  <a href="05-dynamodb-explained.html"><div class="no">5</div><h3>DynamoDB explained</h3><p>Keys, partitions, single-table design, GSIs, query vs scan, costs, pagination and the lab.</p><div class="tags"><span class="pill">Sprint 2a</span><span class="pill">DynamoDB</span></div></a>
+  <a href="06-building-the-jobs-api.html"><div class="no">6</div><h3>Building the jobs API</h3><p>Our three Python files, testing with moto, the CDK table and permissions, live tests and every bug we fixed.</p><div class="tags"><span class="pill">Sprint 2a</span><span class="pill">Python</span><span class="pill">testing</span></div></a>
+  <a href="07-testing-debugging-and-habits.html"><div class="no">7</div><h3>Testing, debugging and good habits</h3><p>The testing pyramid, a debugging playbook, every error we hit, daily checklists, git and the glossary.</p><div class="tags"><span class="pill">reference</span><span class="pill">glossary</span></div></a>
+</div>
+
+<h2><span class="n">?</span>How to read the boxes</h2>
+<div class="box simple"><span class="label">In simple words</span><p>Every idea starts here: an everyday comparison a 10-year-old would understand. Read this first.</p></div>
+<div class="box tech"><span class="label">Technical view</span><p>The same idea with the real AWS and programming terms.</p></div>
+<div class="box warn"><span class="label">Watch out</span><p>A common mistake, and how to avoid it.</p></div>
+<div class="box danger"><span class="label">Costs money</span><p>Something that can charge your AWS bill.</p></div>
+<div class="box story"><span class="label">Real story from our build</span><p>Something that actually happened while we built TalentMatch, and what it taught us.</p></div>
+<div class="box explore"><span class="label">Explore more</span><p>Extra things to try in the console or terminal that we haven't done together yet.</p></div>
+<p>Each chapter also has <strong>Technical terms</strong> tables (term · simple meaning · example from our project), <strong>Try it</strong> steps with real commands, and a <strong>Check yourself</strong> quiz where you click to reveal each answer.</p>
+<p class="muted">Tip: open these files straight from Finder (double-click <code>index.html</code>). They work offline, and follow your Mac's light/dark mode.</p>
+</main>
+</body>
+</html>

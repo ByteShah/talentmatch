@@ -1,0 +1,927 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Building the Jobs API</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+  <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah" d="M0,0 L10,5 L0,10 z"/></marker>
+  <marker id="arb" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah blue" d="M0,0 L10,5 L0,10 z"/></marker>
+  <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah red" d="M0,0 L10,5 L0,10 z"/></marker>
+  <marker id="arg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah green" d="M0,0 L10,5 L0,10 z"/></marker>
+</defs></svg>
+
+<nav class="topbar" aria-label="Chapters"><div class="in">
+  <a class="home" href="index.html">TalentMatch book</a>
+  <a href="00-plan-and-design.html">0 Plan</a>
+  <a href="01-aws-basics-and-account-setup.html">1 AWS</a>
+  <a href="02-infrastructure-as-code-with-cdk.html">2 CDK</a>
+  <a href="03-lambda-and-the-health-api.html">3 Lambda</a>
+  <a href="04-hosting-the-ui-s3-cloudfront.html">4 UI hosting</a>
+  <a href="05-dynamodb-explained.html">5 DynamoDB</a>
+  <a class="here" href="06-building-the-jobs-api.html">6 Jobs API</a>
+  <a href="07-testing-debugging-and-habits.html">7 Debugging</a>
+</div></nav>
+
+<main>
+<header class="hero">
+  <div class="num">06</div>
+  <div class="kicker">Chapter 6 · Sprint 2a · Build</div>
+  <h1>Building the Jobs API</h1>
+  <p class="sub">We turned the DynamoDB theory from Chapter 5 into real code: three Python files in one Lambda, tests against a fake database, a table plus permissions in CDK, and a live API you tested with curl. This chapter also covers every bug we hit along the way.</p>
+  <div class="learn">
+    <h3>What you will learn</h3>
+    <ul>
+      <li>Splitting one Lambda into router, data and error files</li>
+      <li>How a request travels through each route</li>
+      <li>One error shape and a clear set of error codes</li>
+      <li>The three outcomes: success, expected error, bug (500)</li>
+      <li>Testing DynamoDB code with moto, no AWS needed</li>
+      <li>The table, grant, routes and CORS in CDK</li>
+      <li>Least privilege, proven by breaking it</li>
+      <li>Twelve real bugs and how to spot them fast</li>
+    </ul>
+  </div>
+  <nav class="toc" aria-label="In this chapter">
+    <a href="#s1">6.1 Big picture</a><a href="#s2">6.2 Three files</a><a href="#s3">6.3 app.py</a>
+    <a href="#s4">6.4 jobs.py</a><a href="#s5">6.5 Errors</a><a href="#s6">6.6 Request journeys</a>
+    <a href="#s7">6.7 Testing with moto</a><a href="#s8">6.8 CDK</a><a href="#s9">6.9 Live tests</a>
+    <a href="#s10">6.10 Least privilege</a><a href="#s11">6.11 Bugs we fixed</a><a href="#s12">6.12 Explore more</a>
+    <a href="#s13">6.13 Next: 2b</a><a href="#qa">Check yourself</a>
+  </nav>
+</header>
+
+<!-- ================= 6.1 ================= -->
+<section id="s1">
+<h2><span class="n">6.1</span>The big picture</h2>
+<p class="lead">Sprint 2a adds one database table and three new routes to the walking skeleton from Sprint 1. Recruiters can now create, view and list job roles.</p>
+
+<div class="box simple"><span class="label">In simple words</span>
+<p>Before, our app was a shop with a front door (API Gateway) and one shop assistant (the Lambda) who could only say "we're open" (<code>/v1/health</code>). Now the assistant also has a filing cabinet (DynamoDB) and three new jobs to do: <strong>file</strong> a new job role, <strong>fetch</strong> one, and <strong>list</strong> them all, newest first.</p>
+</div>
+
+<figure>
+  <svg viewBox="0 0 760 300" role="img" aria-label="curl or the browser calls API Gateway with 4 routes, all going to one Lambda that reads and writes the DynamoDB table and its GSI1 index, writes logs, and uses an IAM role">
+    <rect class="bx user" x="20" y="110" width="120" height="56" rx="10"/><text class="t" x="34" y="134">curl / browser</text><text class="s" x="34" y="152">you</text>
+    <path class="w blue" d="M140 138 H186" marker-end="url(#arb)"/>
+    <rect class="bx aws" x="190" y="40" width="190" height="196" rx="10"/>
+    <text class="t" x="204" y="64">API Gateway (HTTP API)</text>
+    <rect class="bx" x="204" y="78" width="162" height="28" rx="5"/><text class="m" x="214" y="97">GET  /v1/health</text>
+    <rect class="bx" x="204" y="114" width="162" height="28" rx="5"/><text class="m" x="214" y="133">GET  /v1/jobs</text>
+    <rect class="bx" x="204" y="150" width="162" height="28" rx="5"/><text class="m" x="214" y="169">POST /v1/jobs</text>
+    <rect class="bx" x="204" y="186" width="162" height="28" rx="5"/><text class="m" x="214" y="205">GET  /v1/jobs/{jobId}</text>
+    <path class="w" d="M380 138 H426" marker-end="url(#ar)"/><text class="lb" x="386" y="128">shared</text>
+    <rect class="bx code" x="430" y="96" width="150" height="84" rx="10"/>
+    <text class="t" x="444" y="120">Lambda (Python)</text><text class="s" x="444" y="140">app.py · jobs.py</text><text class="s" x="444" y="156">errors.py</text>
+    <path class="w blue" d="M580 120 H626" marker-end="url(#arb)"/>
+    <rect class="bx data" x="630" y="60" width="115" height="100" rx="10"/>
+    <text class="t" x="644" y="84">DynamoDB</text><text class="s" x="644" y="102">PK · SK</text>
+    <rect class="bx aws" x="642" y="112" width="92" height="36" rx="6"/><text class="m" x="654" y="134">GSI1</text>
+    <path class="w dash" d="M505 180 V226" marker-end="url(#ar)"/>
+    <rect class="bx" x="430" y="230" width="150" height="50" rx="8"/><text class="t" x="444" y="252">CloudWatch Logs</text><text class="s" x="444" y="268">/talentmatch/dev/api</text>
+    <rect class="bx warn" x="630" y="190" width="115" height="70" rx="8"/><text class="t" x="642" y="214">IAM role</text><text class="s" x="642" y="232">grantReadWrite</text><text class="s" x="642" y="248">this table only</text>
+    <path class="w dash" d="M580 160 C605 160 610 225 626 225" marker-end="url(#ar)"/>
+  </svg>
+  <figcaption>Figure 6.1 · Sprint 2a in one picture: four routes, one Lambda, one table with one index, and an IAM role that allows only this table.</figcaption>
+</figure>
+
+<h3>Technical terms</h3>
+<div class="tw"><table class="terms">
+  <tr><th>Term</th><th>Simple meaning</th><th>Example from our project</th></tr>
+  <tr><td>Route</td><td>A method + path the API answers</td><td><code>POST /v1/jobs</code></td></tr>
+  <tr><td>Integration</td><td>The pipe from a route to the code</td><td><code>HttpLambdaIntegration('ApiIntegration', apiFn)</code></td></tr>
+  <tr><td>Endpoint</td><td>A full URL you can call</td><td><code>https://1ezo0amr36…/v1/jobs</code></td></tr>
+  <tr><td>CRUD</td><td>Create, Read, Update, Delete</td><td>2a does C and R; 2b adds U</td></tr>
+</table></div>
+</section>
+
+<!-- ================= 6.2 ================= -->
+<section id="s2">
+<h2><span class="n">6.2</span>Three files, one Lambda</h2>
+<p class="lead">The Lambda code now lives in three files, each with one job. They all ship in <strong>one</strong> Lambda, because <code>Code.fromAsset('src/api')</code> zips the whole folder.</p>
+
+<div class="box simple"><span class="label">In simple words</span>
+<p>A restaurant has a <strong>front desk</strong> that greets you and decides where you go (<code>app.py</code>), a <strong>kitchen</strong> that does the real work with the ingredients (<code>jobs.py</code> with DynamoDB), and a <strong>complaints card</strong> everyone uses the same way (<code>errors.py</code>). The front desk never cooks, and the kitchen never talks to customers.</p>
+</div>
+
+<figure>
+  <svg viewBox="0 0 760 260" role="img" aria-label="app.py imports jobs.py and errors.py; jobs.py imports errors.py and boto3, which talks to DynamoDB">
+    <rect class="bx aws" x="20" y="100" width="120" height="50" rx="8"/><text class="t" x="34" y="122">API Gateway</text><text class="s" x="34" y="139">event</text>
+    <path class="w blue" d="M140 125 H196" marker-end="url(#arb)"/>
+    <rect class="bx code" x="200" y="40" width="210" height="170" rx="10"/>
+    <text class="t" x="214" y="64">app.py · front desk</text>
+    <text class="m" x="214" y="90">handler(event, context)</text>
+    <text class="m" x="214" y="112">ROUTES = {...}</text>
+    <text class="m" x="214" y="134">parse_body()</text>
+    <text class="m" x="214" y="156">response() · json_default()</text>
+    <text class="m" x="214" y="178">health · list_jobs ·</text>
+    <text class="m" x="214" y="196">create_job · get_job</text>
+    <path class="w" d="M410 90 H476" marker-end="url(#ar)"/><text class="lb" x="420" y="82">imports</text>
+    <rect class="bx code" x="480" y="40" width="160" height="110" rx="10"/>
+    <text class="t" x="494" y="64">jobs.py · kitchen</text>
+    <text class="m" x="494" y="88">table() · to_public()</text>
+    <text class="m" x="494" y="108">create_job · get_job</text>
+    <text class="m" x="494" y="128">list_jobs · tokens</text>
+    <path class="w" d="M640 95 H676" marker-end="url(#ar)"/>
+    <rect class="bx data" x="680" y="70" width="70" height="50" rx="8"/><text class="t" x="690" y="92">boto3</text><text class="s" x="690" y="108">→ DDB</text>
+    <rect class="bx warn" x="480" y="175" width="160" height="60" rx="10"/>
+    <text class="t" x="494" y="199">errors.py</text><text class="m" x="494" y="219">class ApiError</text>
+    <path class="w dash" d="M410 190 H476" marker-end="url(#ar)"/><text class="lb" x="420" y="182">imports</text>
+    <path class="w dash" d="M560 150 V171" marker-end="url(#ar)"/>
+  </svg>
+  <figcaption>Figure 6.2 · Who imports whom. Only <code>jobs.py</code> touches DynamoDB, and both other files raise or catch <code>ApiError</code>.</figcaption>
+</figure>
+
+<div class="box tech"><span class="label">Technical view</span>
+<p>This is called <strong>separation of concerns</strong>. <code>app.py</code> knows HTTP: events, status codes and JSON. <code>jobs.py</code> knows data: keys, queries and validation. If the key design changes, only <code>jobs.py</code> changes. If we add a route, only <code>app.py</code> and CDK change. <code>import jobs</code> works inside Lambda because all three files sit side by side in the zip's root, which is on Python's import path.</p>
+</div>
+
+<h3>Technical terms</h3>
+<div class="tw"><table class="terms">
+  <tr><th>Term</th><th>Simple meaning</th><th>Example from our project</th></tr>
+  <tr><td>Module</td><td>One Python file you can import</td><td><code>jobs.py</code> → <code>import jobs</code></td></tr>
+  <tr><td>Separation of concerns</td><td>Each file has one job</td><td>HTTP in app.py, data in jobs.py</td></tr>
+  <tr><td>Asset</td><td>A folder CDK zips and uploads</td><td><code>src/api</code> → one Lambda zip</td></tr>
+</table></div>
+</section>
+
+<!-- ================= 6.3 ================= -->
+<section id="s3">
+<h2><span class="n">6.3</span>The front desk: app.py</h2>
+<p class="lead"><code>app.py</code> reads the request, picks a route function from a dictionary, and turns whatever happens into an HTTP response. It never touches the database itself.</p>
+
+<h3>The router</h3>
+<div class="file">src/api/app.py</div>
+<pre class="code">ROUTES = {
+    <span class="s">"GET /v1/health"</span>: health,
+    <span class="s">"GET /v1/jobs"</span>: list_jobs,
+    <span class="s">"POST /v1/jobs"</span>: create_job,
+<span class="hl">    <span class="s">"GET /v1/jobs/{jobId}"</span>: get_job,</span>
+}</pre>
+<div class="box warn"><span class="label">Watch out: routeKey is the template</span>
+<p>For a request to <code>/v1/jobs/3f2a…</code>, API Gateway sends <code>routeKey = "GET /v1/jobs/{jobId}"</code>, the <strong>template</strong> with the curly braces, and puts the real ID in <code>event["pathParameters"]["jobId"]</code>. That's why the dictionary lookup works. It's also why a test that calls <code>call(f"GET /v1/jobs/{id}")</code> gets 404 "No route" (Section 6.11).</p>
+</div>
+
+<h3>The handler and its three outcomes</h3>
+<div class="file">src/api/app.py</div>
+<pre class="code"><span class="k">def</span> handler(event, context):
+    route = event.get(<span class="s">"routeKey"</span>, <span class="s">""</span>)
+    log(<span class="s">"INFO"</span>, <span class="s">"request"</span>, context, route=route)
+
+    <span class="k">try</span>:
+        route_fn = ROUTES.get(route)
+        <span class="k">if</span> route_fn <span class="k">is None</span>:
+            <span class="k">raise</span> ApiError(status=404, code=<span class="s">"NOT_FOUND"</span>, message=f<span class="s">"No route {route}"</span>)
+<span class="hl">        status, body = route_fn(event)</span>
+        <span class="k">return</span> response(status, body)
+    <span class="k">except</span> ApiError <span class="k">as</span> e:
+        log(<span class="s">"WARNING"</span>, <span class="s">"Request failed"</span>, context, route=route, status=e.status, code=e.code, error=e.message, details=e.details)
+        error = {<span class="s">"code"</span>: e.code, <span class="s">"message"</span>: e.message}
+        <span class="k">if</span> e.details <span class="k">is not None</span>:
+            error[<span class="s">"details"</span>] = e.details
+        <span class="k">return</span> response(e.status, {<span class="s">"error"</span>: error})
+    <span class="k">except</span> Exception:
+        logger.exception(json.dumps({<span class="s">"level"</span>: <span class="s">"ERROR"</span>, <span class="s">"message"</span>: <span class="s">"Unhandled exception"</span>, <span class="s">"request_id"</span>: context.aws_request_id, <span class="s">"route"</span>: route}))
+<span class="hl">        <span class="k">return</span> response(500, {<span class="s">"error"</span>: {<span class="s">"code"</span>: <span class="s">"INTERNAL"</span>, <span class="s">"message"</span>: <span class="s">"Something went wrong"</span>}})</span></pre>
+
+<figure>
+  <svg viewBox="0 0 760 280" role="img" aria-label="Flowchart: the route function runs; success returns 200 or 201; an ApiError returns 400 or 404 with a WARNING log; any other exception returns 500 with an ERROR log and stack trace">
+    <rect class="bx aws" x="20" y="110" width="140" height="56" rx="10"/><text class="t" x="34" y="134">Request arrives</text><text class="s" x="34" y="152">routeKey, body…</text>
+    <path class="w" d="M160 138 H206" marker-end="url(#ar)"/>
+    <rect class="bx code" x="210" y="110" width="150" height="56" rx="10"/><text class="t" x="224" y="134">route_fn(event)</text><text class="s" x="224" y="152">returns (status, body)</text>
+    <path class="w green" d="M360 125 C400 125 400 50 436 50" marker-end="url(#arg)"/>
+    <path class="w" d="M360 138 H436" marker-end="url(#ar)"/>
+    <path class="w red" d="M360 152 C400 152 400 226 436 226" marker-end="url(#arr)"/>
+    <rect class="bx user" x="440" y="20" width="300" height="62" rx="10"/>
+    <text class="t" x="454" y="44">✓ Worked → 200 / 201 + data</text><text class="s" x="454" y="64">log: INFO "request"</text>
+    <rect class="bx warn" x="440" y="108" width="300" height="62" rx="10"/>
+    <text class="t" x="454" y="132">raise ApiError → 400 / 404</text><text class="s" x="454" y="152">bad input, not found · log: WARNING + code</text>
+    <rect class="bx bad" x="440" y="196" width="300" height="62" rx="10"/>
+    <text class="t" x="454" y="220">Any other exception → 500</text><text class="s" x="454" y="240">a bug, or AWS denied · log: ERROR + stack trace</text>
+  </svg>
+  <figcaption>Figure 6.3 · Every request ends in exactly one of three boxes. The client never sees a stack trace, but the logs always do.</figcaption>
+</figure>
+
+<div class="tw"><table>
+  <tr><th>What happened</th><th>Caught by</th><th>Client gets</th><th>Logs get</th></tr>
+  <tr><td>Everything worked</td><td>—</td><td>200 / 201 + data</td><td><code>INFO request</code></td></tr>
+  <tr><td>Expected problem (bad input, not found)</td><td><code>except ApiError</code></td><td>400 / 404 + error JSON</td><td><code>WARNING</code> + error code</td></tr>
+  <tr><td>A bug, or AWS failed (e.g. no permission)</td><td><code>except Exception</code></td><td>500 + generic message</td><td><code>ERROR</code> + full stack trace + request_id</td></tr>
+</table></div>
+
+<h3>Reading the body and query string</h3>
+<div class="file">src/api/app.py</div>
+<pre class="code"><span class="k">def</span> parse_body(event):
+    raw = event.get(<span class="s">"body"</span>, <span class="s">""</span>)
+    <span class="k">if</span> event.get(<span class="s">"isBase64Encoded"</span>):
+        raw = base64.b64decode(raw).decode(<span class="s">"utf-8"</span>)
+    <span class="k">try</span>:
+        body = json.loads(raw) <span class="k">if</span> raw <span class="k">else</span> {}
+    <span class="k">except</span> json.JSONDecodeError:
+        <span class="k">raise</span> ApiError(status=400, code=<span class="s">"BAD_REQUEST"</span>, message=<span class="s">"Request body is not valid JSON."</span>)
+    <span class="k">if not</span> isinstance(body, dict):
+        <span class="k">raise</span> ApiError(status=400, code=<span class="s">"BAD_REQUEST"</span>, message=<span class="s">"Request body must be a JSON object."</span>)
+    <span class="k">return</span> body</pre>
+<ul>
+  <li>The JSON you send arrives in <code>event["body"]</code> as a <strong>string</strong>. For some content types, API Gateway base64-encodes it and sets <code>isBase64Encoded</code>, so we decode first.</li>
+  <li><code>?limit=5</code> arrives as the <strong>string</strong> <code>"5"</code> in <code>event["queryStringParameters"]</code>. <code>list_jobs</code> calls <code>int()</code> and keeps it between 1 and 100.</li>
+  <li>The path ID comes from <code>(event.get("pathParameters") or {}).get("jobId")</code>. The <code>or {}</code> handles a key that exists but is <code>None</code>.</li>
+</ul>
+
+<h3>Decimal-safe JSON</h3>
+<div class="file">src/api/app.py</div>
+<pre class="code"><span class="k">def</span> json_default(value):
+    <span class="k">if</span> isinstance(value, Decimal):
+        <span class="k">return</span> int(value) <span class="k">if</span> value == value.to_integral_value() <span class="k">else</span> float(value)
+    <span class="k">raise</span> TypeError(f<span class="s">"Cannot serialize {type(value)} to JSON"</span>)</pre>
+<p><code>json.dumps(body, default=json_default)</code> calls this for any value it can't handle. DynamoDB numbers come back as <code>Decimal</code> (Chapter 5.1), and this turns them into normal JSON numbers.</p>
+
+<h3>Technical terms</h3>
+<div class="tw"><table class="terms">
+  <tr><th>Term</th><th>Simple meaning</th><th>Example from our project</th></tr>
+  <tr><td>Router</td><td>Picks which function handles a request</td><td>The <code>ROUTES</code> dict</td></tr>
+  <tr><td>routeKey</td><td>"METHOD /path-template" from API Gateway</td><td><code>"GET /v1/jobs/{jobId}"</code></td></tr>
+  <tr><td>pathParameters</td><td>The real values for <code>{…}</code> in the path</td><td><code>{"jobId": "3f2a…"}</code></td></tr>
+  <tr><td>queryStringParameters</td><td>Values after <code>?</code> in the URL, as strings</td><td><code>{"limit": "1", "nextToken": "eyJ…"}</code></td></tr>
+  <tr><td>Exception</td><td>Python's way of saying "stop, something's wrong"</td><td><code>raise ApiError(...)</code></td></tr>
+  <tr><td>Stack trace</td><td>The list of lines that led to a crash</td><td>Printed by <code>logger.exception</code></td></tr>
+  <tr><td>201 Created</td><td>"Success, and I made a new thing"</td><td>The <code>POST /v1/jobs</code> response</td></tr>
+</table></div>
+</section>
+
+<!-- ================= 6.4 ================= -->
+<section id="s4">
+<h2><span class="n">6.4</span>The kitchen: jobs.py</h2>
+<p class="lead"><code>jobs.py</code> holds every DynamoDB detail: connecting, validating, choosing keys, writing safely, reading one item, and listing with pagination.</p>
+
+<h3>Connect once, reuse</h3>
+<div class="file">src/api/jobs.py</div>
+<pre class="code">_table = <span class="k">None</span>
+
+<span class="k">def</span> table():
+    <span class="k">global</span> _table
+    <span class="k">if</span> _table <span class="k">is None</span>:
+<span class="hl">        _table = boto3.resource(<span class="s">"dynamodb"</span>).Table(os.environ[<span class="s">"TABLE_NAME"</span>])</span>
+    <span class="k">return</span> _table</pre>
+<div class="box simple"><span class="label">In simple words</span>
+<p>The first customer of the day makes the chef switch on the stove. Every later customer gets their food faster, because the stove is already hot. A Lambda container stays "warm" between requests, so we connect once and reuse the connection. <code>TABLE_NAME</code> is set by CDK (Section 6.8).</p>
+</div>
+
+<h3>Hide storage details</h3>
+<pre class="code"><span class="k">def</span> to_public(item):
+    <span class="k">return</span> {k: v <span class="k">for</span> k, v <span class="k">in</span> item.items() <span class="k">if</span> k <span class="k">not in</span> (<span class="s">"PK"</span>, <span class="s">"SK"</span>, <span class="s">"GSI1PK"</span>, <span class="s">"GSI1SK"</span>, <span class="s">"type"</span>)}</pre>
+<p>Clients see <code>id</code>, <code>title</code>, <code>status</code> and so on, never <code>PK</code> or <code>GSI1SK</code>. If the key design changes later, the API stays the same, and the frontend can't accidentally depend on <code>JOB#</code> strings.</p>
+
+<h3>Validate everything before writing</h3>
+<pre class="code"><span class="k">def</span> validate_new_job(body):
+    errors = []
+    <span class="k">for</span> field, max_len <span class="k">in</span> ((<span class="s">"title"</span>, 200), (<span class="s">"description"</span>, 20000)):
+        value = body.get(field)
+        <span class="k">if not</span> isinstance(value, str) <span class="k">or not</span> value.strip():
+            errors.append({<span class="s">"field"</span>: field, <span class="s">"message"</span>: f<span class="s">"{field} is required and must be a non-empty string."</span>})
+        <span class="k">elif</span> len(value) &gt; max_len:
+            errors.append({<span class="s">"field"</span>: field, <span class="s">"message"</span>: f<span class="s">"{field} must not exceed {max_len} characters."</span>})
+
+    <span class="k">if</span> errors:
+        <span class="k">raise</span> ApiError(status=400, code=<span class="s">"VALIDATION_FAILED"</span>, message=<span class="s">"Invalid input data."</span>, details=errors)</pre>
+<p>It collects <strong>all</strong> problems before failing, so the user sees "title is required" and "description is required" together. <code>value.strip()</code> rejects a title made only of spaces.</p>
+
+<h3>Create: keys, GSI keys and a safe write</h3>
+<pre class="code"><span class="k">def</span> create_job(body):
+    validate_new_job(body)
+    now = datetime.now(timezone.utc).isoformat()
+    job_id = uuid.uuid4().hex
+    item = {
+        <span class="s">"PK"</span>: f<span class="s">"JOB#{job_id}"</span>,
+        <span class="s">"SK"</span>: <span class="s">"META"</span>,
+<span class="hl">        <span class="s">"GSI1PK"</span>: <span class="s">"JOB"</span>,</span>
+<span class="hl">        <span class="s">"GSI1SK"</span>: f<span class="s">"{now}#{job_id}"</span>,  <span class="c"># time first, so the index sorts newest/oldest</span></span>
+        <span class="s">"type"</span>: <span class="s">"job"</span>,
+        <span class="s">"id"</span>: job_id,
+        <span class="s">"title"</span>: body[<span class="s">"title"</span>].strip(),
+        <span class="s">"description"</span>: body[<span class="s">"description"</span>].strip(),
+        <span class="s">"status"</span>: <span class="s">"open"</span>,
+        <span class="s">"createdAt"</span>: now,
+        <span class="s">"updatedAt"</span>: now,
+    }
+<span class="hl">    table().put_item(Item=item, ConditionExpression=<span class="s">"attribute_not_exists(PK)"</span>)</span>
+    <span class="k">return</span> to_public(item)</pre>
+<div class="tw"><table>
+  <tr><th>Line</th><th>Chapter 5 idea it uses</th></tr>
+  <tr><td><code>PK = JOB#&lt;id&gt;</code>, <code>SK = META</code></td><td>Folder and page (5.2), access pattern #1</td></tr>
+  <tr><td><code>GSI1PK = "JOB"</code></td><td>Same value for every job, so "list all" is one exact query (5.3, 5.6)</td></tr>
+  <tr><td><code>GSI1SK = "&lt;time&gt;#&lt;id&gt;"</code></td><td>ISO time sorts in order; <code>#id</code> keeps it unique (5.6)</td></tr>
+  <tr><td><code>uuid.uuid4().hex</code></td><td>A random ID, so there's no "next number" to coordinate</td></tr>
+  <tr><td><code>attribute_not_exists(PK)</code></td><td>Never overwrite (5.8, lab command 7)</td></tr>
+</table></div>
+
+<h3>Get one, and list with a token</h3>
+<pre class="code"><span class="k">def</span> get_job(job_id):
+    item = table().get_item(Key={<span class="s">"PK"</span>: f<span class="s">"JOB#{job_id}"</span>, <span class="s">"SK"</span>: <span class="s">"META"</span>}).get(<span class="s">"Item"</span>)
+    <span class="k">return</span> to_public(item) <span class="k">if</span> item <span class="k">else None</span>
+
+<span class="k">def</span> encode_token(key):
+    <span class="k">if not</span> key:
+        <span class="k">return None</span>
+    <span class="k">return</span> base64.urlsafe_b64encode(json.dumps(key).encode()).decode()
+
+<span class="k">def</span> decode_token(token):
+    <span class="k">try</span>:
+        <span class="k">return</span> json.loads(base64.urlsafe_b64decode(token.encode()).decode())
+    <span class="k">except</span> Exception:
+        <span class="k">raise</span> ApiError(status=400, code=<span class="s">"BAD_REQUEST"</span>, message=<span class="s">"The provided token is invalid."</span>)
+
+<span class="k">def</span> list_jobs(limit, next_token=<span class="k">None</span>):
+    kwargs = {
+        <span class="s">"IndexName"</span>: <span class="s">"GSI1"</span>,
+        <span class="s">"KeyConditionExpression"</span>: Key(<span class="s">"GSI1PK"</span>).eq(<span class="s">"JOB"</span>),
+        <span class="s">"ScanIndexForward"</span>: <span class="k">False</span>,
+        <span class="s">"Limit"</span>: limit,
+    }
+    <span class="k">if</span> next_token:
+        kwargs[<span class="s">"ExclusiveStartKey"</span>] = decode_token(next_token)
+    res = table().query(**kwargs)
+    <span class="k">return</span> {
+        <span class="s">"items"</span>: [to_public(item) <span class="k">for</span> item <span class="k">in</span> res.get(<span class="s">"Items"</span>, [])],
+        <span class="s">"nextToken"</span>: encode_token(res.get(<span class="s">"LastEvaluatedKey"</span>)),
+    }</pre>
+<p>Notice there are no <code>{"S": …}</code> wrappers: boto3's <code>resource</code> API converts Python values for you. Notice too that <code>list_jobs</code> is a <strong>query</strong> on GSI1 with an <strong>exact</strong> key, never a scan.</p>
+
+<h3>Technical terms</h3>
+<div class="tw"><table class="terms">
+  <tr><th>Term</th><th>Simple meaning</th><th>Example from our project</th></tr>
+  <tr><td>Environment variable</td><td>A setting handed to code from outside</td><td><code>os.environ["TABLE_NAME"]</code></td></tr>
+  <tr><td>Warm start</td><td>Reusing an already-running Lambda</td><td><code>_table</code> is created only once</td></tr>
+  <tr><td>Validation</td><td>Checking input before using it</td><td><code>validate_new_job</code></td></tr>
+  <tr><td>UUID</td><td>A random ID that's practically never repeated</td><td><code>3f2a9c1e5b7d…</code></td></tr>
+  <tr><td>ISO 8601</td><td>A date format that sorts correctly as text</td><td><code>2026-10-07T09:15:00.123+00:00</code></td></tr>
+</table></div>
+</section>
+
+<!-- ================= 6.5 ================= -->
+<section id="s5">
+<h2><span class="n">6.5</span>One error shape for everything</h2>
+<p class="lead">Every expected problem raises <code>ApiError</code>. One place in <code>app.py</code> turns it into the same JSON shape, so the frontend handles every error the same way.</p>
+
+<div class="file">src/api/errors.py</div>
+<pre class="code"><span class="k">class</span> ApiError(Exception):
+    <span class="s">"""Custom exception class for API errors."""</span>
+    <span class="k">def</span> __init__(self, status, code, message, details=<span class="k">None</span>):
+        super().__init__(message)
+        self.status = status
+        self.code = code
+        self.message = message
+        self.details = details</pre>
+
+<p>What the client receives for a missing title:</p>
+<pre class="code">{
+  <span class="s">"error"</span>: {
+    <span class="s">"code"</span>: <span class="s">"VALIDATION_FAILED"</span>,
+    <span class="s">"message"</span>: <span class="s">"Invalid input data."</span>,
+    <span class="s">"details"</span>: [{<span class="s">"field"</span>: <span class="s">"title"</span>, <span class="s">"message"</span>: <span class="s">"title is required and must be a non-empty string."</span>}]
+  }
+}</pre>
+
+<div class="tw"><table>
+  <tr><th>Code</th><th>HTTP status</th><th>When</th><th>Example message</th></tr>
+  <tr><td><code>VALIDATION_FAILED</code></td><td>400</td><td>A field is missing or too long</td><td>Invalid input data.</td></tr>
+  <tr><td><code>BAD_REQUEST</code></td><td>400</td><td>Bad JSON, bad limit, bad nextToken</td><td>Limit must be between 1 and 100.</td></tr>
+  <tr><td><code>NOT_FOUND</code></td><td>404</td><td>Unknown job, or a route not in <code>ROUTES</code></td><td>Job not found.</td></tr>
+  <tr><td><code>INTERNAL</code></td><td>500</td><td>Any unexpected exception</td><td>Something went wrong</td></tr>
+</table></div>
+
+<div class="box tech"><span class="label">Technical view</span>
+<p><code>status</code> is for HTTP, <code>code</code> is a stable machine-readable name the frontend can switch on, <code>message</code> is for humans and may change, and <code>details</code> is optional extra structure. We chose <strong>UPPER_SNAKE_CASE</strong> for codes, the style most public APIs (including AWS) use.</p>
+</div>
+
+<h3>Technical terms</h3>
+<div class="tw"><table class="terms">
+  <tr><th>Term</th><th>Simple meaning</th><th>Example from our project</th></tr>
+  <tr><td>Custom exception</td><td>Your own named kind of error</td><td><code>class ApiError(Exception)</code></td></tr>
+  <tr><td>Error code</td><td>A fixed label code can check</td><td><code>NOT_FOUND</code></td></tr>
+  <tr><td>4xx vs 5xx</td><td>4xx = the caller's mistake, 5xx = ours</td><td>400 bad title vs 500 bug</td></tr>
+</table></div>
+</section>
+
+<!-- ================= 6.6 ================= -->
+<section id="s6">
+<h2><span class="n">6.6</span>Journeys of a request</h2>
+<p class="lead">Follow one request through each route. The steps are the same every time: API Gateway → <code>handler</code> → route function → <code>jobs.py</code> → DynamoDB → back out as JSON.</p>
+
+<h3>POST /v1/jobs: create a job</h3>
+<figure>
+  <svg viewBox="0 0 760 330" role="img" aria-label="Sequence for creating a job: curl to API Gateway to handler, parse_body, create_job validates, put_item with condition to DynamoDB, returns 201">
+    <rect class="bx user" x="10" y="15" width="100" height="32" rx="8"/><text class="t" x="36" y="36">curl</text>
+    <rect class="bx aws" x="150" y="15" width="120" height="32" rx="8"/><text class="t" x="164" y="36">API Gateway</text>
+    <rect class="bx code" x="320" y="15" width="120" height="32" rx="8"/><text class="t" x="346" y="36">app.py</text>
+    <rect class="bx code" x="490" y="15" width="110" height="32" rx="8"/><text class="t" x="512" y="36">jobs.py</text>
+    <rect class="bx data" x="645" y="15" width="105" height="32" rx="8"/><text class="t" x="660" y="36">DynamoDB</text>
+    <line class="w dash" x1="60" y1="47" x2="60" y2="320"/><line class="w dash" x1="210" y1="47" x2="210" y2="320"/>
+    <line class="w dash" x1="380" y1="47" x2="380" y2="320"/><line class="w dash" x1="545" y1="47" x2="545" y2="320"/><line class="w dash" x1="697" y1="47" x2="697" y2="320"/>
+    <path class="w blue" d="M60 75 H206" marker-end="url(#arb)"/><text class="lb" x="68" y="68">POST /v1/jobs</text>
+    <path class="w" d="M210 105 H376" marker-end="url(#ar)"/><text class="lb" x="218" y="98">event: routeKey, body</text>
+    <rect class="bx" x="385" y="118" width="150" height="26" rx="5"/><text class="m" x="393" y="136">parse_body → dict</text>
+    <path class="w" d="M380 168 H541" marker-end="url(#ar)"/><text class="lb" x="388" y="161">create_job(body)</text>
+    <rect class="bx" x="550" y="180" width="140" height="26" rx="5"/><text class="m" x="558" y="198">validate ✓, keys</text>
+    <path class="w" d="M545 228 H693" marker-end="url(#ar)"/><text class="lb" x="553" y="221">put_item + condition</text>
+    <path class="w green" d="M697 252 H549" marker-end="url(#arg)"/><text class="lb" x="590" y="245">saved</text>
+    <path class="w green" d="M545 276 H384" marker-end="url(#arg)"/><text class="lb" x="400" y="269">to_public(item)</text>
+    <path class="w green" d="M380 300 H64" marker-end="url(#arg)"/><text class="lb" x="70" y="293">201 + job JSON</text>
+  </svg>
+  <figcaption>Figure 6.4 · Creating a job. If validation fails at "validate", an ApiError jumps straight back to app.py and the client gets 400.</figcaption>
+</figure>
+
+<h3>GET /v1/jobs: list with pagination</h3>
+<figure>
+  <svg viewBox="0 0 760 210" role="img" aria-label="Flow for listing jobs: read limit and nextToken, check limit, decode token, query GSI1, encode LastEvaluatedKey, return items and nextToken">
+    <rect class="bx aws" x="10" y="20" width="135" height="60" rx="8"/><text class="t" x="22" y="44">?limit=1</text><text class="s" x="22" y="62">&amp;nextToken=eyJ…</text>
+    <path class="w" d="M145 50 H171" marker-end="url(#ar)"/>
+    <rect class="bx code" x="175" y="20" width="130" height="60" rx="8"/><text class="t" x="187" y="44">int(limit)</text><text class="s" x="187" y="62">1–100, else 400</text>
+    <path class="w" d="M305 50 H331" marker-end="url(#ar)"/>
+    <rect class="bx code" x="335" y="20" width="130" height="60" rx="8"/><text class="t" x="347" y="44">decode_token</text><text class="s" x="347" y="62">garbage → 400</text>
+    <path class="w" d="M465 50 H491" marker-end="url(#ar)"/>
+    <rect class="bx data" x="495" y="14" width="250" height="72" rx="8"/><text class="t" x="507" y="36">query GSI1 · GSI1PK = "JOB"</text><text class="s" x="507" y="55">ScanIndexForward=False, Limit,</text><text class="s" x="507" y="72">ExclusiveStartKey (if a token)</text>
+    <path class="w" d="M620 86 V110 H590" marker-end="url(#ar)"/>
+    <rect class="bx code" x="340" y="95" width="245" height="56" rx="8"/><text class="t" x="352" y="118">encode_token(LastEvaluatedKey)</text><text class="s" x="352" y="136">None on the last page</text>
+    <path class="w green" d="M340 123 H246" marker-end="url(#arg)"/>
+    <rect class="bx user" x="10" y="95" width="232" height="56" rx="8"/><text class="t" x="22" y="118">200 {items: [...],</text><text class="t" x="22" y="136">nextToken: "…" | null}</text>
+    <text class="s" x="10" y="185">Each item passes through to_public(), so PK, SK and the GSI1 keys never leave the Lambda.</text>
+  </svg>
+  <figcaption>Figure 6.5 · Listing jobs. Both checks happen before DynamoDB is called, so bad input costs nothing.</figcaption>
+</figure>
+
+<h3>GET /v1/jobs/{jobId}, and the error paths</h3>
+<div class="tw"><table>
+  <tr><th>Request</th><th>Path through the code</th><th>Result</th></tr>
+  <tr><td><code>GET /v1/jobs/&lt;real id&gt;</code></td><td><code>get_job</code> → <code>get_item(PK, SK=META)</code> → found</td><td>200 + job</td></tr>
+  <tr><td><code>GET /v1/jobs/does-not-exist</code></td><td><code>get_item</code> returns no <code>Item</code> → <code>None</code> → <code>raise ApiError(404)</code></td><td>404 <code>NOT_FOUND</code></td></tr>
+  <tr><td><code>POST</code> with <code>{"description":"x"}</code></td><td><code>validate_new_job</code> raises before any write</td><td>400 <code>VALIDATION_FAILED</code></td></tr>
+  <tr><td><code>POST</code> with <code>not json</code></td><td><code>parse_body</code> raises</td><td>400 <code>BAD_REQUEST</code></td></tr>
+  <tr><td><code>DELETE /v1/jobs/abc</code></td><td>No such route in API Gateway, so <strong>the Lambda never runs</strong></td><td>404 <code>{"message":"Not Found"}</code></td></tr>
+</table></div>
+</section>
+
+<!-- ================= 6.7 ================= -->
+<section id="s7">
+<h2><span class="n">6.7</span>Testing without AWS: venv and moto</h2>
+<p class="lead">Your unit tests run against a <strong>fake DynamoDB in memory</strong>. They're free, take under a second, and can't touch your real account.</p>
+
+<div class="box simple"><span class="label">In simple words</span>
+<p>A flight simulator lets pilots practise crashes safely. <strong>moto</strong> is a flight simulator for AWS: your code thinks it's talking to DynamoDB, but moto answers instead, from memory. When the test ends, the fake table vanishes.</p>
+</div>
+
+<h3>One-time setup: a virtual environment</h3>
+<ol class="steps">
+  <li><strong>Create and activate the venv</strong> (a private folder of Python packages for this project only).
+<pre class="term"><span class="p">$ </span>cd ~/Work/labs/talentmatch
+<span class="p">$ </span>python3 -m venv .venv
+<span class="p">$ </span>source .venv/bin/activate        <span class="c"># prompt now shows (.venv); do this in every new terminal</span></pre></li>
+  <li><strong>Install the dev packages</strong> from <code>requirements-dev.txt</code>:
+<pre class="code">boto3
+moto[dynamodb]</pre>
+<pre class="term"><span class="p">$ </span>pip install -r requirements-dev.txt
+<span class="p">$ </span>python -c "import boto3, moto; print('ok')"
+<span class="o">ok</span></pre></li>
+</ol>
+<div class="box warn"><span class="label">Watch out</span>
+<p>Forget <code>source .venv/bin/activate</code> and you'll see <code>ModuleNotFoundError: No module named 'boto3'</code>. The Lambda runtime already includes boto3; <code>requirements-dev.txt</code> is only for your Mac.</p>
+</div>
+
+<h3>How the test file works</h3>
+<figure>
+  <svg viewBox="0 0 760 230" role="img" aria-label="A test calls call(), which builds a fake API Gateway event and runs app.handler; jobs.py calls boto3, and @mock_aws intercepts the call and answers from an in-memory table, so real AWS is never reached">
+    <rect class="bx user" x="10" y="30" width="120" height="56" rx="8"/><text class="t" x="22" y="54">test_…()</text><text class="s" x="22" y="72">assertEqual(...)</text>
+    <path class="w" d="M130 58 H156" marker-end="url(#ar)"/>
+    <rect class="bx code" x="160" y="30" width="130" height="56" rx="8"/><text class="t" x="172" y="54">call(route,…)</text><text class="s" x="172" y="72">builds a fake event</text>
+    <path class="w" d="M290 58 H316" marker-end="url(#ar)"/>
+    <rect class="bx code" x="320" y="30" width="130" height="56" rx="8"/><text class="t" x="332" y="54">app.handler</text><text class="s" x="332" y="72">your real code</text>
+    <path class="w" d="M450 58 H476" marker-end="url(#ar)"/>
+    <rect class="bx code" x="480" y="30" width="110" height="56" rx="8"/><text class="t" x="492" y="54">jobs.py</text><text class="s" x="492" y="72">boto3 call</text>
+    <rect class="grp" x="610" y="14" width="140" height="200" rx="10"/><text class="gt" x="622" y="34">@mock_aws</text>
+    <path class="w blue" d="M590 58 H636" marker-end="url(#arb)"/>
+    <rect class="bx data" x="640" y="44" width="100" height="56" rx="8"/><text class="t" x="652" y="68">fake table</text><text class="s" x="652" y="86">in memory</text>
+    <rect class="bx bad" x="640" y="140" width="100" height="56" rx="8"/><text class="t" x="652" y="164">real AWS</text><text class="s" x="652" y="182">never reached</text>
+    <path class="w red dash" d="M560 86 C560 168 600 168 636 168"/>
+    <path class="w red" d="M604 156 L620 180 M620 156 L604 180"/>
+    <rect class="bx warn" x="160" y="120" width="290" height="80" rx="8"/>
+    <text class="t" x="172" y="144">setUp() runs before every test</text>
+    <text class="s" x="172" y="164">jobs._table = None (forget the old link)</text>
+    <text class="s" x="172" y="182">create_table(...) with PK, SK and GSI1</text>
+  </svg>
+  <figcaption>Figure 6.6 · Inside a unit test. Your code runs for real; only the database underneath is fake.</figcaption>
+</figure>
+
+<div class="file">tests/api/test_jobs.py (top)</div>
+<pre class="code">os.environ.update({
+    <span class="s">"TABLE_NAME"</span>: <span class="s">"test-table"</span>,
+    <span class="s">"AWS_DEFAULT_REGION"</span>: <span class="s">"ap-south-1"</span>,
+    <span class="s">"AWS_ACCESS_KEY_ID"</span>: <span class="s">"test"</span>,
+    <span class="s">"AWS_SECRET_ACCESS_KEY"</span>: <span class="s">"testing"</span>
+})
+...
+<span class="k">def</span> call(route, body=<span class="k">None</span>, path=<span class="k">None</span>, query=<span class="k">None</span>):
+    event = {<span class="s">"routeKey"</span>: route, <span class="s">"body"</span>: json.dumps(body) <span class="k">if</span> body <span class="k">is not None else None</span>,
+             <span class="s">"pathParameters"</span>: path, <span class="s">"queryStringParameters"</span>: query}
+    res = app.handler(event, CONTEXT)
+    <span class="k">return</span> res[<span class="s">"statusCode"</span>], json.loads(res[<span class="s">"body"</span>])
+
+<span class="hl">@mock_aws</span>
+<span class="k">class</span> JobsTest(unittest.TestCase):
+    <span class="k">def</span> setUp(self):
+        jobs._table = <span class="k">None</span>
+        boto3.client(<span class="s">"dynamodb"</span>).create_table(TableName=<span class="s">"test-table"</span>, ...)</pre>
+<ul>
+  <li><strong>Fake credentials</strong> (<code>"test"</code> / <code>"testing"</code>) mean that even if moto missed something, nothing could reach your real account.</li>
+  <li><strong><code>@mock_aws</code></strong> on the class covers <code>setUp</code> and every test method.</li>
+  <li><strong><code>jobs._table = None</code></strong> stops a connection cached by an earlier test from pointing at an old fake table.</li>
+  <li><strong><code>create_table</code></strong> in <code>setUp</code> is the same table as your lab and CDK: PK, SK, GSI1, pay-per-request.</li>
+</ul>
+
+<h3>Run the tests</h3>
+<pre class="term"><span class="p">$ </span>python -m unittest discover -s tests/api -v
+<span class="o">test_health_returns_ok (test_app.HealthTest...) ... ok
+test_unknown_route_returns_404 (test_app.HealthTest...) ... ok
+test_create_then_get (test_jobs.JobsTest...) ... ok
+test_list_pagination_newest_first (test_jobs.JobsTest...) ... ok
+test_missing_title_is_rejected (test_jobs.JobsTest...) ... ok
+test_unknown_job_is_404 (test_jobs.JobsTest...) ... ok
+----------------------------------------------------------------------
+Ran 6 tests in 0.877s
+
+OK</span>
+<span class="c"># the JSON WARNING lines in between are your logs from the "bad request" tests; that's expected</span></pre>
+
+<h3>Break it on purpose: your experiments and answers</h3>
+<div class="tw"><table>
+  <tr><th>Change in jobs.py</th><th>Test that failed</th><th>Why</th></tr>
+  <tr><td><code>ScanIndexForward</code> → <code>True</code></td><td><code>test_list_pagination_newest_first</code></td><td>The index is read oldest first, so page 1 is <code>["A","B"]</code>, not <code>["C","B"]</code>. You got this right.</td></tr>
+  <tr><td>Delete the <code>"GSI1PK": "JOB"</code> line</td><td><code>test_list_pagination_newest_first</code></td><td>The query itself runs fine but finds <strong>nothing</strong>: without GSI1PK, items aren't copied into GSI1 (a <strong>sparse index</strong>), so the list is <code>[]</code>. <code>get_job</code> still works through the main table.</td></tr>
+  <tr><td>Remove <code>"PK", "SK"</code> from <code>to_public</code></td><td><code>test_create_then_get</code></td><td><code>self.assertNotIn("PK", body)</code> fails because the storage keys leak into the API response.</td></tr>
+</table></div>
+<div class="box tech"><span class="label">The lesson</span>
+<p>Each test guards one behaviour. When you break that behaviour, the test whose name describes it fails. That's how you know your tests are useful and not just decoration.</p>
+</div>
+
+<h3>Technical terms</h3>
+<div class="tw"><table class="terms">
+  <tr><th>Term</th><th>Simple meaning</th><th>Example from our project</th></tr>
+  <tr><td>Unit test</td><td>A quick check of one small behaviour</td><td><code>test_unknown_job_is_404</code></td></tr>
+  <tr><td>Mock</td><td>A fake stand-in for a real service</td><td><code>@mock_aws</code> from moto</td></tr>
+  <tr><td>Fixture / setUp</td><td>Prepares a clean world before each test</td><td>Creates <code>test-table</code></td></tr>
+  <tr><td>Virtual environment</td><td>A private set of Python packages</td><td><code>.venv/</code> (git-ignored)</td></tr>
+  <tr><td>Assertion</td><td>"This must be true, or fail the test"</td><td><code>self.assertEqual(status, 201)</code></td></tr>
+</table></div>
+</section>
+
+<!-- ================= 6.8 ================= -->
+<section id="s8">
+<h2><span class="n">6.8</span>The CDK side: table, grant, routes</h2>
+<p class="lead">Six small changes in <code>lib/talentmatch-stack.ts</code> create the real table, tell the Lambda its name, give it permission, and add the routes.</p>
+
+<div class="file">lib/talentmatch-stack.ts</div>
+<pre class="code"><span class="c">// ADR-004: one table, on-demand billing, keys designed for known access patterns.</span>
+<span class="k">const</span> table = <span class="k">new</span> dynamodb.TableV2(<span class="k">this</span>, <span class="s">'Table'</span>, {
+  partitionKey: { name: <span class="s">'PK'</span>, type: dynamodb.AttributeType.STRING },
+  sortKey: { name: <span class="s">'SK'</span>, type: dynamodb.AttributeType.STRING },
+  billing: dynamodb.Billing.onDemand(),
+  globalSecondaryIndexes: [{
+    indexName: <span class="s">'GSI1'</span>,
+    partitionKey: { name: <span class="s">'GSI1PK'</span>, type: dynamodb.AttributeType.STRING },
+    sortKey: { name: <span class="s">'GSI1SK'</span>, type: dynamodb.AttributeType.STRING },
+  }],
+  <span class="c">// Dev data is disposable; prod data must survive a stack delete.</span>
+<span class="hl">  removalPolicy: props.stage === <span class="s">'prod'</span> ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,</span>
+});
+...
+  environment: { STAGE: props.stage, APP_VERSION: <span class="s">'0.1.0'</span>, <span class="hl">TABLE_NAME: table.tableName</span> },
+});
+<span class="c">// Least privilege: read/write on this table and its indexes only.</span>
+<span class="hl">table.grantReadWriteData(apiFn);</span>
+...
+  allowMethods: [apigw.CorsHttpMethod.GET, apigw.CorsHttpMethod.POST],
+...
+<span class="c">// Every route goes to the same Lambda; app.py's ROUTES picks the function.</span>
+<span class="k">const</span> integration = <span class="k">new</span> HttpLambdaIntegration(<span class="s">'ApiIntegration'</span>, apiFn);
+api.addRoutes({ path: <span class="s">'/v1/health'</span>, methods: [apigw.HttpMethod.GET], integration });
+api.addRoutes({ path: <span class="s">'/v1/jobs'</span>, methods: [apigw.HttpMethod.GET, apigw.HttpMethod.POST], integration });
+api.addRoutes({ path: <span class="s">'/v1/jobs/{jobId}'</span>, methods: [apigw.HttpMethod.GET], integration });
+...
+<span class="k">new</span> cdk.CfnOutput(<span class="k">this</span>, <span class="s">'TableName'</span>, { value: table.tableName });</pre>
+
+<figure>
+  <svg viewBox="0 0 760 250" role="img" aria-label="CDK code on the left produces CloudFormation resources on the right: a GlobalTable, an IAM policy on the Lambda role, an environment variable, and four routes sharing one integration">
+    <rect class="bx code" x="10" y="20" width="230" height="210" rx="10"/>
+    <text class="t" x="24" y="44">talentmatch-stack.ts</text>
+    <text class="m" x="24" y="72">new TableV2(...)</text>
+    <text class="m" x="24" y="104">TABLE_NAME: table.tableName</text>
+    <text class="m" x="24" y="136">table.grantReadWriteData(fn)</text>
+    <text class="m" x="24" y="168">allowMethods: GET, POST</text>
+    <text class="m" x="24" y="200">addRoutes × 3 (4 routes)</text>
+    <path class="w blue" d="M240 125 H296" marker-end="url(#arb)"/><text class="lb" x="246" y="116">cdk synth</text>
+    <rect class="bx data" x="300" y="20" width="210" height="40" rx="8"/><text class="m" x="312" y="45">AWS::DynamoDB::GlobalTable</text>
+    <rect class="bx" x="300" y="70" width="210" height="40" rx="8"/><text class="m" x="312" y="95">Lambda Environment.TABLE_NAME</text>
+    <rect class="bx warn" x="300" y="120" width="210" height="40" rx="8"/><text class="m" x="312" y="145">AWS::IAM::Policy (role)</text>
+    <rect class="bx aws" x="300" y="170" width="210" height="60" rx="8"/><text class="m" x="312" y="193">ApiGatewayV2::Route ×4</text><text class="m" x="312" y="215">+ 1 Integration</text>
+    <rect class="bx" x="540" y="20" width="210" height="210" rx="10"/>
+    <text class="t" x="554" y="44">What you check in cdk diff</text>
+    <text class="s" x="554" y="70">• KeySchema PK/SK + GSI1</text>
+    <text class="s" x="554" y="95">• TABLE_NAME = Ref to the table</text>
+    <text class="s" x="554" y="120">• IAM table: dynamodb actions on</text>
+    <text class="s" x="554" y="138">   the table ARN and …/index/*</text>
+    <text class="s" x="554" y="163">• 4 routes, one integration</text>
+    <text class="s" x="554" y="188">• Lambda updated, not replaced</text>
+    <text class="s" x="554" y="213">• removalPolicy: Delete (dev)</text>
+  </svg>
+  <figcaption>Figure 6.7 · What each CDK line becomes in CloudFormation, and what to look for when you review <code>cdk diff</code>.</figcaption>
+</figure>
+
+<h3>Why each piece matters</h3>
+<div class="tw"><table>
+  <tr><th>Piece</th><th>What it does</th><th>Why</th></tr>
+  <tr><td><code>TableV2</code></td><td>Creates an <code>AWS::DynamoDB::GlobalTable</code></td><td>The recommended construct. With one region it's a normal table, and a replica region can be added later without migrating.</td></tr>
+  <tr><td><code>removalPolicy</code></td><td>Dev: <code>DESTROY</code>. Prod: <code>RETAIN</code></td><td><code>cdk destroy</code> on prod leaves the table and its data in place as an orphan. Recovery is slow but nothing is lost.</td></tr>
+  <tr><td><code>TABLE_NAME</code></td><td>Passes the generated name as an env var</td><td><code>table.tableName</code> is a token until deploy; CloudFormation fills in e.g. <code>TalentMatch-dev-TableCD117FA1-1MYDSRWJRNU0A</code>.</td></tr>
+  <tr><td><code>grantReadWriteData</code></td><td>Adds an IAM policy to the Lambda's role</td><td>By default a Lambda can do nothing except write logs. This is the CDK version of SAM's <code>DynamoDBCrudPolicy</code>.</td></tr>
+  <tr><td>CORS <code>POST</code></td><td>Lets the browser send a preflight for POST</td><td>Without it, the React page couldn't create jobs (curl doesn't care about CORS).</td></tr>
+  <tr><td>Shared <code>integration</code></td><td>One pipe reused by four routes</td><td>One Lambda for the API: fewer cold starts, one log group, shared code.</td></tr>
+</table></div>
+
+<h3>Everything the grant allows</h3>
+<div class="tw"><table>
+  <tr><th>Action</th><th>Used today?</th><th>What it's for</th></tr>
+  <tr><td><code>GetItem</code></td><td><span class="pill green">yes</span> <code>get_job</code></td><td>Read one item by full key</td></tr>
+  <tr><td><code>PutItem</code></td><td><span class="pill green">yes</span> <code>create_job</code></td><td>Write or replace one item</td></tr>
+  <tr><td><code>Query</code></td><td><span class="pill green">yes</span> <code>list_jobs</code></td><td>Read many items from one PK</td></tr>
+  <tr><td><code>UpdateItem</code></td><td><span class="pill amber">2b</span></td><td>Change some attributes (edit or close a job)</td></tr>
+  <tr><td><code>ConditionCheckItem</code></td><td><span class="pill amber">2b</span></td><td>A condition inside a transaction (idempotency)</td></tr>
+  <tr><td><code>DeleteItem</code></td><td><span class="pill">no</span></td><td>Remove an item</td></tr>
+  <tr><td><code>BatchGetItem</code> / <code>BatchWriteItem</code></td><td><span class="pill">no</span></td><td>Up to 100 reads / 25 writes in one call</td></tr>
+  <tr><td><code>Scan</code></td><td><span class="pill red">never</span></td><td>Read the whole table</td></tr>
+  <tr><td><code>DescribeTable</code></td><td><span class="pill">no</span></td><td>Read the table's settings</td></tr>
+  <tr><td><code>GetRecords</code>, <code>GetShardIterator</code></td><td><span class="pill">no</span></td><td>Read DynamoDB Streams (change events)</td></tr>
+</table></div>
+<div class="box tech"><span class="label">The trade-off</span>
+<p>The grant is a <strong>convenience bundle</strong>. It's least privilege on the <strong>resource</strong> (only this table and <code>…/index/*</code>) but not on the <strong>actions</strong>; it even allows <code>Scan</code>. A stricter version lists exact actions with <code>apiFn.addToRolePolicy(new iam.PolicyStatement({ actions: ['dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:Query'], resources: [table.tableArn, `${table.tableArn}/index/*`] }))</code>. Sprint 15 revisits this with IAM Access Analyzer.</p>
+</div>
+
+<h3>CDK tests</h3>
+<div class="file">test/talentmatch.test.ts</div>
+<pre class="code">test(<span class="s">'table is on-demand with PK and SK'</span>, () =&gt; {
+  template.hasResourceProperties(<span class="s">'AWS::DynamoDB::GlobalTable'</span>, {
+    BillingMode: <span class="s">'PAY_PER_REQUEST'</span>,
+    KeySchema: [{ AttributeName: <span class="s">'PK'</span>, KeyType: <span class="s">'HASH'</span> }, { AttributeName: <span class="s">'SK'</span>, KeyType: <span class="s">'RANGE'</span> }],
+  });
+});
+
+test(<span class="s">'jobs routes exist'</span>, () =&gt; {
+  template.hasResourceProperties(<span class="s">'AWS::ApiGatewayV2::Route'</span>, { RouteKey: <span class="s">'GET /v1/jobs'</span> });
+  template.hasResourceProperties(<span class="s">'AWS::ApiGatewayV2::Route'</span>, { RouteKey: <span class="s">'POST /v1/jobs'</span> });
+  template.hasResourceProperties(<span class="s">'AWS::ApiGatewayV2::Route'</span>, { RouteKey: <span class="s">'GET /v1/jobs/{jobId}'</span> });
+});</pre>
+<pre class="term"><span class="p">$ </span>npm run build &amp;&amp; npm test
+<span class="o">Tests:       6 passed, 6 total</span>
+<span class="p">$ </span>npx cdk diff TalentMatch-dev       <span class="c"># read the IAM table before you deploy</span>
+<span class="p">$ </span>npx cdk deploy TalentMatch-dev
+<span class="o">Stack includes security-sensitive updates and "--require-approval" is set to 'broadening'.
+Do you wish to deploy these changes? (y/n) y
+✅  TalentMatch-dev
+Outputs:
+TalentMatch-dev.ApiLogGroup = /talentmatch/dev/api
+TalentMatch-dev.ApiUrl = https://1ezo0amr36.execute-api.ap-south-1.amazonaws.com
+TalentMatch-dev.TableName = TalentMatch-dev-TableCD117FA1-1MYDSRWJRNU0A
+TalentMatch-dev.WebUrl = https://d2kcn6pne6ts5i.cloudfront.net</span></pre>
+<p class="muted">The "security-sensitive updates" prompt appears because the IAM policy is new. CDK asks before it widens any permission.</p>
+
+<h3>Technical terms</h3>
+<div class="tw"><table class="terms">
+  <tr><th>Term</th><th>Simple meaning</th><th>Example from our project</th></tr>
+  <tr><td>Construct</td><td>A CDK building block</td><td><code>new dynamodb.TableV2(...)</code></td></tr>
+  <tr><td>Token</td><td>A placeholder filled in at deploy time</td><td><code>table.tableName</code></td></tr>
+  <tr><td>Removal policy</td><td>What happens to a resource on delete</td><td><code>RETAIN</code> in prod</td></tr>
+  <tr><td>Grant</td><td>A one-line IAM permission helper</td><td><code>grantReadWriteData</code></td></tr>
+  <tr><td>ARN</td><td>The full unique name of an AWS resource</td><td><code>arn:aws:dynamodb:ap-south-1:1434…:table/TalentMatch-dev-…</code></td></tr>
+  <tr><td>Orphan</td><td>A resource no stack manages anymore</td><td>A retained prod table after <code>cdk destroy</code></td></tr>
+</table></div>
+</section>
+
+<!-- ================= 6.9 ================= -->
+<section id="s9">
+<h2><span class="n">6.9</span>Live tests with curl</h2>
+<p class="lead">With the stack deployed, you tested every path against the real API, with the logs open in a second terminal.</p>
+
+<ol class="steps">
+  <li><strong>Tab 1: watch the logs.</strong>
+<pre class="term"><span class="p">$ </span>aws logs tail /talentmatch/dev/api --follow</pre></li>
+  <li><strong>Tab 2: save the URL.</strong>
+<pre class="term"><span class="p">$ </span>API=https://1ezo0amr36.execute-api.ap-south-1.amazonaws.com
+<span class="c"># a shell variable for this tab only; type $API from now on</span></pre></li>
+</ol>
+
+<h3>A. The happy path</h3>
+<pre class="term"><span class="p">$ </span>curl -s $API/v1/health
+<span class="o">{"status": "ok", "stage": "dev", "version": "0.1.0", "time": "2026-10-07T..."}</span>
+
+<span class="p">$ </span>curl -s -X POST $API/v1/jobs -H 'content-type: application/json' \
+    -d '{"title":"Odoo Developer","description":"Python, Odoo, PostgreSQL. 3-6 years."}'
+<span class="o">{"id": "3f2a...", "title": "Odoo Developer", "description": "...", "status": "open",
+ "createdAt": "2026-10-07T...", "updatedAt": "2026-10-07T..."}</span>     <span class="c"># no PK / SK</span>
+
+<span class="p">$ </span>curl -s -X POST $API/v1/jobs -H 'content-type: application/json' \
+    -d '{"title":"React Developer","description":"React, TypeScript, ERP domain a plus."}'
+
+<span class="p">$ </span>curl -s $API/v1/jobs
+<span class="o">{"items": [{"title": "React Developer", ...}, {"title": "Odoo Developer", ...}], "nextToken": null}</span>
+
+<span class="p">$ </span>curl -s $API/v1/jobs/&lt;paste-id&gt;
+<span class="o">{"id": "3f2a...", "title": "Odoo Developer", ...}</span></pre>
+<p><code>-X POST</code> sets the method, <code>-H</code> adds a header, and <code>-d</code> sends the body. React comes first because it was created last.</p>
+
+<h3>B. Pagination</h3>
+<pre class="term"><span class="p">$ </span>curl -s "$API/v1/jobs?limit=1"
+<span class="o">{"items": [{"title": "React Developer", ...}], "nextToken": "eyJQSyI6ICJKT0Ij..."}</span>
+<span class="p">$ </span>curl -s "$API/v1/jobs?limit=1&amp;nextToken=&lt;paste-token&gt;"
+<span class="o">{"items": [{"title": "Odoo Developer", ...}], "nextToken": "..." or null}</span></pre>
+<div class="box warn"><span class="label">Watch out: quote the URL</span>
+<p><code>?</code> and <code>&amp;</code> are special characters in zsh. Without the quotes, zsh treats <code>&amp;</code> as "run in the background" and cuts the command in half.</p>
+</div>
+
+<h3>C. Error paths</h3>
+<div class="tw"><table>
+  <tr><th>#</th><th>Command</th><th>Expected</th></tr>
+  <tr><td>7</td><td><code>curl -s -i $API/v1/jobs/does-not-exist</code></td><td>404 <code>NOT_FOUND</code> "Job not found."</td></tr>
+  <tr><td>8</td><td><code>curl -s -i -X POST $API/v1/jobs -H 'content-type: application/json' -d '{"description":"x"}'</code></td><td>400 <code>VALIDATION_FAILED</code>, details name <code>title</code></td></tr>
+  <tr><td>9</td><td><code>curl -s -i -X POST $API/v1/jobs -d 'not json'</code></td><td>400 <code>BAD_REQUEST</code></td></tr>
+  <tr><td>10</td><td><code>curl -s "$API/v1/jobs?limit=500"</code></td><td>400 "Limit must be between 1 and 100."</td></tr>
+  <tr><td>11</td><td><code>curl -s "$API/v1/jobs?nextToken=garbage"</code></td><td>400 "The provided token is invalid."</td></tr>
+  <tr><td>12</td><td><code>curl -s -i -X DELETE $API/v1/jobs/abc</code></td><td>404 <code>{"message":"Not Found"}</code> from API Gateway; <strong>no log line</strong></td></tr>
+</table></div>
+<p><code>-i</code> prints the status line and headers, e.g. <code>HTTP/2 404</code>. Compare 7 and 12: in 7 your Lambda answered with your own error JSON; in 12 API Gateway answered alone, because there's no <code>DELETE</code> route.</p>
+
+<h3>D. Look inside AWS</h3>
+<ul class="check">
+  <li>DynamoDB console → your table → <strong>Explore table items</strong>: the raw <code>PK = JOB#…</code>, <code>SK = META</code>, <code>GSI1PK = JOB</code> and <code>GSI1SK = 2026-10-07T…#…</code> your API hides.</li>
+  <li>Switch the dropdown to the <strong>GSI1</strong> index → Query → <code>GSI1PK = JOB</code>. That's exactly what <code>list_jobs</code> runs.</li>
+  <li>Tab 1 logs: an <code>INFO</code> line per request, <code>WARNING</code> lines with codes for tests 7–11, and no <code>ERROR</code> lines.</li>
+</ul>
+</section>
+
+<!-- ================= 6.10 ================= -->
+<section id="s10">
+<h2><span class="n">6.10</span>E. Least privilege, proven by breaking it</h2>
+<p class="lead">Comment out the grant, deploy, and create a job. The client gets <strong>500</strong>, and the log shows <code>AccessDeniedException</code>. Put the line back and it works again.</p>
+
+<div class="box simple"><span class="label">In simple words</span>
+<p>The shop assistant has a keycard that opens only the filing cabinet. Take the keycard away and the assistant can't file anything. The customer didn't do anything wrong; the <strong>shop</strong> is broken. That's why the customer gets "sorry, our fault" (500), not "you're not allowed" (403).</p>
+</div>
+
+<figure>
+  <svg viewBox="0 0 760 240" role="img" aria-label="Without the grant, the Lambda's role calls PutItem, IAM denies it with AccessDeniedException, the generic except branch catches it and returns 500. A 403 would only come from denying the user, which Sprint 3 adds at API Gateway">
+    <rect class="bx user" x="10" y="40" width="110" height="50" rx="8"/><text class="t" x="22" y="62">curl POST</text><text class="s" x="22" y="78">valid job</text>
+    <path class="w" d="M120 65 H156" marker-end="url(#ar)"/>
+    <rect class="bx code" x="160" y="40" width="140" height="50" rx="8"/><text class="t" x="172" y="62">Lambda role</text><text class="s" x="172" y="78">grant removed</text>
+    <path class="w red" d="M300 65 H336" marker-end="url(#arr)"/><text class="lb" x="160" y="110">calls dynamodb:PutItem</text>
+    <rect class="bx bad" x="340" y="30" width="190" height="70" rx="8"/><text class="t" x="352" y="54">IAM: AccessDenied</text><text class="s" x="352" y="72">not authorized to perform</text><text class="s" x="352" y="88">dynamodb:PutItem</text>
+    <path class="w red" d="M530 65 H566" marker-end="url(#arr)"/>
+    <rect class="bx warn" x="570" y="30" width="180" height="70" rx="8"/><text class="t" x="582" y="54">except Exception</text><text class="s" x="582" y="72">ERROR log + stack trace</text><text class="s" x="582" y="88">client: 500 INTERNAL</text>
+    <line class="w dash" x1="10" y1="125" x2="750" y2="125"/>
+    <text class="gt" x="10" y="150">Who was denied?</text>
+    <rect class="bx" x="10" y="162" width="360" height="62" rx="8"/><text class="t" x="22" y="185">Our Lambda was denied → 500</text><text class="s" x="22" y="205">The server's own fault; the request was fine.</text>
+    <rect class="bx aws" x="390" y="162" width="360" height="62" rx="8"/><text class="t" x="402" y="185">The user is denied → 401 / 403</text><text class="s" x="402" y="205">Sprint 3: API Gateway checks the login token first.</text>
+  </svg>
+  <figcaption>Figure 6.8 · A missing permission inside the server is a server error. A 403 is about the caller, and that arrives with Cognito in Sprint 3.</figcaption>
+</figure>
+
+<ol class="steps">
+  <li>In <code>lib/talentmatch-stack.ts</code>, comment out <code>// table.grantReadWriteData(apiFn);</code></li>
+  <li><code>npx cdk diff TalentMatch-dev</code>: notice the IAM policy shown as <strong>removed</strong>.</li>
+  <li><code>npx cdk deploy TalentMatch-dev</code>, then create a job with curl.</li>
+  <li>Expected: <code>500 {"error": {"code": "INTERNAL", ...}}</code>. In the logs: <code>ERROR</code> with <code>AccessDeniedException … is not authorized to perform: dynamodb:PutItem on resource: arn:aws:dynamodb:ap-south-1:…:table/TalentMatch-dev-Table…</code></li>
+  <li><strong>Put the line back</strong> and deploy again. Creating works.</li>
+</ol>
+</section>
+
+<!-- ================= 6.11 ================= -->
+<section id="s11">
+<h2><span class="n">6.11</span>Bugs we hit and fixed</h2>
+<p class="lead">Every one of these happened while building 2a. Each taught a rule worth keeping.</p>
+
+<div class="box story"><span class="label">Bug 1 · log() got multiple values for argument 'message'</span>
+<p><code>log("WARNING", "Request failed", context, …, message=e.message)</code>. But <code>log(level, message, context, **fields)</code> already has <code>message</code> as its 2nd parameter, so Python got it twice and crashed. <strong>Fix:</strong> <code>error=e.message</code>. <strong>Rule:</strong> never pass a named parameter again through <code>**fields</code>.</p></div>
+
+<div class="box story"><span class="label">Bug 2 · health returned 404 instead of 200 (three bugs hiding each other)</span>
+<p>(a) <code>health()</code> returned <code>response(200, …)</code>, a full dict, instead of the pair <code>(200, {...})</code>. (b) <code>status, body = route_fn(event)</code> then crashed with "too many values to unpack". (c) <code>except Exception</code> logged the crash but didn't <code>return</code>, so the code fell through to a final <code>return response(404, …)</code>. A bug looked like "not found". <strong>Fix:</strong> return the pair, make the except branch <code>return response(500, …)</code>, and delete the fall-through. <strong>Rule:</strong> an error handler must never disguise one problem as another.</p></div>
+
+<div class="box story"><span class="label">Bug 3 · isinstnce typo</span>
+<p><code>if isinstnce(value, Decimal)</code> only runs when a non-JSON value appears, so tests passed. It would have exploded in Sprint 9 when scores became numbers. <strong>Rule:</strong> rarely run lines hide typos; read your code, and test the rare paths.</p></div>
+
+<div class="box story"><span class="label">Bug 4 · pathParameters can be None</span>
+<p><code>event.get("pathParameters", {})</code> returns <code>None</code> when the key exists with value <code>None</code> (our tests send exactly that), and <code>None.get</code> crashes. <strong>Fix:</strong> <code>(event.get("pathParameters") or {}).get("jobId")</code>.</p></div>
+
+<div class="box story"><span class="label">Bug 5 · "newest first" came back in random order</span>
+<p><code>GSI1SK = f"JOB#{job_id}"</code> sorted by a random UUID. <strong>Fix:</strong> <code>f"{now}#{job_id}"</code>, time first. <code>test_list_pagination_newest_first</code> is there to catch exactly this.</p></div>
+
+<div class="box story"><span class="label">Bug 6 · four different error-code styles</span>
+<p><code>NotFound</code>, <code>InvalidJson</code>, <code>ValidationError</code> and the test's <code>VALIDATION_FAILED</code>. The test failed, and a frontend would have needed four styles. <strong>Fix:</strong> one style everywhere: <code>NOT_FOUND</code>, <code>BAD_REQUEST</code>, <code>VALIDATION_FAILED</code>, <code>INTERNAL</code>.</p></div>
+
+<div class="box story"><span class="label">Bug 7 · only 2 tests ran instead of 6</span>
+<p>The four <code>def test_…(self)</code> functions weren't <strong>indented</strong> under <code>class JobsTest</code>, so they were plain module functions, and unittest silently ignores those. No error, just missing tests. <strong>Rule:</strong> if fewer tests run than you wrote, check the indentation first.</p></div>
+
+<div class="box story"><span class="label">Bug 8 · the routeKey in tests had the real ID</span>
+<p><code>call(f"GET /v1/jobs/{body['id']}")</code> doesn't match any <code>ROUTES</code> key, because routeKey is always the template. <strong>Fix:</strong> <code>call("GET /v1/jobs/{jobId}", path={"jobId": body["id"]})</code>, and make <code>call()</code> pass <code>path</code> and <code>query</code> into the event.</p></div>
+
+<div class="box story"><span class="label">Bug 9 · "Start directory is not importable: 'tests/api'"</span>
+<p>The Python tests were in <code>test/api</code>, but the command looked in <code>tests/api</code>. This message really means "that folder doesn't exist <strong>from where you're standing</strong>". <code>pwd</code> and <code>ls</code> find it in seconds.</p></div>
+
+<div class="box story"><span class="label">Bug 10 · text_app.py</span>
+<p>unittest only discovers files named <code>test*.py</code>, so <code>text_app.py</code> was silently skipped. <strong>Fix:</strong> rename it to <code>test_app.py</code>.</p></div>
+
+<div class="box story"><span class="label">Bug 11 · error.py vs errors.py</span>
+<p>The code says <code>from errors import ApiError</code>, but the file was <code>error.py</code>, giving <code>ModuleNotFoundError: No module named 'errors'</code>. <strong>Rule:</strong> the file name <strong>is</strong> the module name.</p></div>
+
+<div class="box story"><span class="label">Bug 12 · test/ vs tests/ and Jest's roots</span>
+<p>The CDK test <code>talentmatch.test.ts</code> ended up in <code>tests/</code>, but <code>jest.config.js</code> has <code>roots: ['&lt;rootDir&gt;/test']</code>, so <code>npm test</code> couldn't find it. <strong>Fix:</strong> <code>git mv tests/talentmatch.test.ts test/</code>. Layout: <code>test/</code> = CDK tests (Jest), <code>tests/api/</code> = Python tests (unittest).</p></div>
+
+<figure>
+  <svg viewBox="0 0 760 200" role="img" aria-label="Folder layout: test folder holds talentmatch.test.ts run by Jest via npm test; tests/api holds test_app.py and test_jobs.py run by python -m unittest; src/api holds app.py, errors.py, jobs.py">
+    <rect class="bx code" x="10" y="20" width="230" height="160" rx="10"/>
+    <text class="t" x="24" y="44">src/api/  (Lambda code)</text>
+    <text class="m" x="24" y="72">app.py</text><text class="m" x="24" y="96">errors.py</text><text class="m" x="24" y="120">jobs.py</text>
+    <text class="s" x="24" y="160">zipped by Code.fromAsset</text>
+    <rect class="bx aws" x="265" y="20" width="230" height="160" rx="10"/>
+    <text class="t" x="279" y="44">test/  (CDK, TypeScript)</text>
+    <text class="m" x="279" y="72">talentmatch.test.ts</text>
+    <text class="s" x="279" y="140">run by Jest: npm test</text>
+    <text class="s" x="279" y="160">jest.config.js roots → test/</text>
+    <rect class="bx user" x="520" y="20" width="230" height="160" rx="10"/>
+    <text class="t" x="534" y="44">tests/api/  (Python)</text>
+    <text class="m" x="534" y="72">test_app.py</text><text class="m" x="534" y="96">test_jobs.py</text>
+    <text class="s" x="534" y="140">run by: python -m unittest</text>
+    <text class="s" x="534" y="160">discover -s tests/api</text>
+  </svg>
+  <figcaption>Figure 6.9 · Where every file lives, and which tool runs it. Names must start with <code>test</code> for unittest to find them.</figcaption>
+</figure>
+</section>
+
+<!-- ================= 6.12 ================= -->
+<section id="s12">
+<h2><span class="n">6.12</span>Explore more</h2>
+<div class="box explore"><span class="label">Explore more</span>
+<ul class="check">
+  <li><strong>Read the real IAM policy.</strong> Lambda console → your function → Configuration → Permissions → click the role → open the policy. Find the <code>Resource</code> list: the table ARN and <code>…/index/*</code>.</li>
+  <li><strong>Invoke the Lambda directly</strong>, without API Gateway, using a hand-made event:
+<pre class="term"><span class="p">$ </span>aws lambda invoke --function-name TalentMatch-dev-ApiFunctionCE271BD4-KWfgExCKxT3a \
+    --cli-binary-format raw-in-base64-out \
+    --payload '{"routeKey":"GET /v1/jobs","queryStringParameters":{"limit":"1"}}' out.json &amp;&amp; cat out.json</pre>
+  This is what <code>call()</code> does in your tests, but against the real Lambda.</li>
+  <li><strong>Search the logs with Logs Insights.</strong> CloudWatch → Logs Insights → <code>/talentmatch/dev/api</code> → <code>fields @timestamp, level, route, code | filter level = "WARNING" | sort @timestamp desc</code>. Your JSON logs become searchable columns.</li>
+  <li><strong>Find one request end to end.</strong> Copy a <code>request_id</code> from a WARNING line and search for it in the log group. You'll see the INFO, the WARNING and Lambda's own <code>REPORT</code> line with duration and memory.</li>
+  <li><strong>Make a test fail first</strong> (test-driven): write <code>test_title_too_long_is_rejected</code> with a 201-character title, run it, and confirm it passes. Then change 200 to 300 in <code>jobs.py</code> and watch it fail.</li>
+  <li><strong>See base64 bodies.</strong> Temporarily add <code>log("INFO", "raw", context, b64=event.get("isBase64Encoded"))</code>, deploy, and send <code>-d 'not json'</code> with and without <code>-H 'content-type: application/json'</code>.</li>
+  <li><strong>Check the cost.</strong> After a day, Cost Explorer → filter by tag <code>project = talentmatch</code> (activate the tag first under Cost allocation tags).</li>
+</ul>
+</div>
+</section>
+
+<!-- ================= 6.13 ================= -->
+<section id="s13">
+<h2><span class="n">6.13</span>What's next: Sprint 2b</h2>
+<p class="lead">2b finishes the jobs API: edit a job, close a job, and make "create" safe to retry.</p>
+<div class="three">
+  <div class="card"><h4>Edit a job</h4><p><code>PATCH /v1/jobs/{jobId}</code> using <code>UpdateItem</code>, which changes only the fields sent. It adds <code>ConditionExpression="attribute_exists(PK)"</code>, so editing a missing job fails cleanly instead of creating a half-empty item.</p></div>
+  <div class="card"><h4>Close a job</h4><p><code>POST /v1/jobs/{jobId}/close</code> sets <code>status = "closed"</code>, with a condition that it's currently open. A good place to try a sparse "open jobs" index.</p></div>
+  <div class="card"><h4>Idempotency keys</h4><p>The client sends an <code>Idempotency-Key</code> header. If a create is retried (say, a flaky network), the second request returns the first job instead of making a duplicate. It uses a transaction with <code>ConditionCheckItem</code>.</p></div>
+</div>
+</section>
+
+<!-- ================= Q&A ================= -->
+<section id="qa">
+<h2><span class="n">6.14</span>Check yourself</h2>
+<p>Try to answer in your head first, then click to reveal.</p>
+<div class="qa-list">
+  <details class="qa"><summary>Why is the code split into app.py, jobs.py and errors.py, yet there's still only one Lambda?</summary><div class="a">Separation of concerns: HTTP handling in app.py, data in jobs.py, one shared error type in errors.py. CDK zips the whole <code>src/api</code> folder (<code>Code.fromAsset</code>) into one Lambda, so the files simply import each other.</div></details>
+  <details class="qa"><summary>A request hits /v1/jobs/3f2a. What is routeKey, and where is the ID?</summary><div class="a"><code>routeKey = "GET /v1/jobs/{jobId}"</code>, the template. The ID is in <code>event["pathParameters"]["jobId"]</code>. That's why the ROUTES lookup works.</div></details>
+  <details class="qa"><summary>What are the three possible outcomes of a request in handler()?</summary><div class="a">Success (200/201, INFO log), an expected ApiError (400/404 with the standard error JSON and a WARNING log), or any other exception (500 INTERNAL to the client, ERROR log with the full stack trace and request_id).</div></details>
+  <details class="qa"><summary>Why does the 500 response say only "Something went wrong"?</summary><div class="a">Internal details like stack traces, table names and ARNs could help an attacker and mean nothing to users. The full detail goes to the logs, tied to the request_id, so you can still debug it.</div></details>
+  <details class="qa"><summary>Why does json_default exist?</summary><div class="a">DynamoDB numbers come back from boto3 as <code>Decimal</code>, which <code>json.dumps</code> can't serialise. json_default turns them into ints or floats.</div></details>
+  <details class="qa"><summary>What does @mock_aws do, and why do the tests set fake credentials?</summary><div class="a">It intercepts every boto3 call and answers from an in-memory fake AWS, so tests are free, fast and isolated. Fake credentials make sure that even if something slipped past moto, it couldn't authenticate against your real account.</div></details>
+  <details class="qa"><summary>Why does setUp() set jobs._table = None?</summary><div class="a"><code>jobs.table()</code> caches the table object. Each test gets a fresh fake table in setUp, so the cache must be cleared to stop it pointing at an earlier test's table.</div></details>
+  <details class="qa"><summary>You delete "GSI1PK": "JOB" from create_job. Which test fails, and why?</summary><div class="a"><code>test_list_pagination_newest_first</code>. Items without GSI1PK aren't copied into GSI1 (a sparse index), so the list query returns nothing. <code>test_create_then_get</code> still passes, because get_item uses the main table.</div></details>
+  <details class="qa"><summary>What does table.grantReadWriteData(apiFn) create, and what's its weakness?</summary><div class="a">An IAM policy on the Lambda's role allowing DynamoDB read/write actions on only this table and its indexes. Its weakness: it includes actions we don't use, such as Scan, DeleteItem and the batch calls, so it's least privilege on the resource but not on the actions.</div></details>
+  <details class="qa"><summary>Without the grant, why does the client get 500 and not 403?</summary><div class="a">IAM denied <strong>our Lambda</strong>, not the user. The request was valid; the server couldn't do its job. The AccessDeniedException isn't an ApiError, so it falls into <code>except Exception</code> → 500. A 403 would mean the caller isn't allowed, which arrives with Cognito in Sprint 3.</div></details>
+  <details class="qa"><summary>What does removalPolicy RETAIN do for the prod table?</summary><div class="a"><code>cdk destroy TalentMatch-prod</code> deletes everything else but leaves the table and its data in your account as an orphan. A redeploy creates a new empty table; reconnecting the old one needs <code>cdk import</code>. Slow, but no data is lost.</div></details>
+  <details class="qa"><summary>Why did DELETE /v1/jobs/abc produce no log line?</summary><div class="a">There's no DELETE route, so API Gateway answered 404 <code>{"message":"Not Found"}</code> itself and never invoked the Lambda. No invocation means no log.</div></details>
+  <details class="qa"><summary>Only 2 tests ran instead of 6. What's the first thing to check?</summary><div class="a">Indentation. The test methods must be indented inside the <code>unittest.TestCase</code> class; otherwise they're plain functions and are silently skipped. Also check file names start with <code>test</code> and that you're running from the project root.</div></details>
+  <details class="qa"><summary>Why is the CORS change to allow POST needed if curl already works?</summary><div class="a">curl doesn't enforce CORS; browsers do. Before a cross-site POST with JSON, the browser sends a preflight OPTIONS request, and API Gateway must answer that POST is allowed for that origin. Without it, the React UI in 2c couldn't create jobs.</div></details>
+</div>
+</section>
+
+<nav class="pager" aria-label="Previous and next chapter">
+  <a class="prev" href="05-dynamodb-explained.html"><small>← Previous</small>5 · DynamoDB explained</a>
+  <a class="next" href="07-testing-debugging-and-habits.html"><small>Next →</small>7 · Testing, debugging and habits</a>
+</nav>
+</main>
+</body>
+</html>

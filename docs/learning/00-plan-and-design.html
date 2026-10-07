@@ -1,0 +1,585 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Plan and Design</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+  <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah" d="M0,0 L10,5 L0,10 z"/></marker>
+  <marker id="arb" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah blue" d="M0,0 L10,5 L0,10 z"/></marker>
+  <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah red" d="M0,0 L10,5 L0,10 z"/></marker>
+  <marker id="arg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah green" d="M0,0 L10,5 L0,10 z"/></marker>
+</defs></svg>
+
+<nav class="topbar" aria-label="Chapters"><div class="in">
+  <a class="home" href="index.html">TalentMatch book</a>
+  <a class="here" href="00-plan-and-design.html">0 Plan</a>
+  <a href="01-aws-basics-and-account-setup.html">1 AWS</a>
+  <a href="02-infrastructure-as-code-with-cdk.html">2 CDK</a>
+  <a href="03-lambda-and-the-health-api.html">3 Lambda</a>
+  <a href="04-hosting-the-ui-s3-cloudfront.html">4 UI hosting</a>
+  <a href="05-dynamodb-explained.html">5 DynamoDB</a>
+  <a href="06-building-the-jobs-api.html">6 Jobs API</a>
+  <a href="07-testing-debugging-and-habits.html">7 Debugging</a>
+</div></nav>
+
+<main>
+<header class="hero">
+  <div class="num">00</div>
+  <div class="kicker">Chapter 0 · The big picture</div>
+  <h1>The plan and the design</h1>
+  <p class="sub">What TalentMatch is, how all its parts fit together, the 16 sprints that build it, the choices we made, what it costs, and exactly where we are today.</p>
+  <div class="learn">
+    <h3>What you will learn</h3>
+    <ul>
+      <li>What TalentMatch does, in one picture</li>
+      <li>The full AWS architecture, layer by layer</li>
+      <li>How a resume travels through the system</li>
+      <li>How a match score out of 100 is built</li>
+      <li>The 16 sprints and 4 milestones</li>
+      <li>How every sprint runs (the learning loop)</li>
+      <li>The decisions we made, and why</li>
+      <li>What it costs, and what we never use</li>
+    </ul>
+  </div>
+  <nav class="toc" aria-label="In this chapter">
+    <a href="#what">0.1 What we build</a><a href="#arch">0.2 Architecture</a><a href="#flow">0.3 Resume journey</a>
+    <a href="#score">0.4 Scoring</a><a href="#sprints">0.5 Sprints</a><a href="#loop">0.6 How a sprint runs</a>
+    <a href="#decisions">0.7 Decisions</a><a href="#cost">0.8 Cost</a><a href="#repo">0.9 Project folder</a>
+    <a href="#now">0.10 Where we are</a><a href="#qa">Check yourself</a>
+  </nav>
+</header>
+
+<!-- ===================== 0.1 ===================== -->
+<section id="what">
+<h2><span class="n">0.1</span>What we are building</h2>
+<p class="lead">TalentMatch is an internal HR app. It reads resumes, notes every skill with the line that proves it, and ranks candidates against a job with a score anyone can check.</p>
+
+<div class="box simple"><span class="label">In simple words</span>
+  <p>Imagine a teacher choosing players for a cricket team. 300 students hand in forms saying what they can do. The teacher has to read every form, decide who really can bowl, and pick the best 11.</p>
+  <p><strong>TalentMatch is a robot helper for that teacher.</strong> It reads all the forms in seconds and writes down "Riya can bowl, because her form says <em>took 12 wickets</em>". Then it puts the students in order for the job. <strong>The teacher still makes the final choice.</strong> The robot only helps.</p>
+</div>
+
+<figure>
+  <svg viewBox="0 0 820 200" role="img" aria-label="Recruiter gives job and resumes to TalentMatch, which reads, finds skills with proof, scores, and returns a ranked list; recruiter decides">
+    <rect class="bx user" x="10" y="20" width="170" height="70" rx="10"/>
+    <text class="t" x="26" y="48">Recruiter</text><text class="s" x="26" y="66">posts a job +</text><text class="s" x="26" y="80">uploads resumes</text>
+    <path class="w blue" d="M180 55 H250" marker-end="url(#arb)"/>
+    <rect class="grp" x="256" y="10" width="380" height="180" rx="12"/>
+    <text class="gt" x="272" y="32">TalentMatch</text>
+    <rect class="bx aws" x="272" y="44" width="160" height="56" rx="8"/><text class="t" x="286" y="68">1. Read</text><text class="s" x="286" y="86">PDF / Word to text</text>
+    <rect class="bx aws" x="460" y="44" width="160" height="56" rx="8"/><text class="t" x="474" y="68">2. Understand</text><text class="s" x="474" y="86">skills + the proof line</text>
+    <rect class="bx aws" x="272" y="118" width="160" height="56" rx="8"/><text class="t" x="286" y="142">4. Rank</text><text class="s" x="286" y="160">best match first</text>
+    <rect class="bx aws" x="460" y="118" width="160" height="56" rx="8"/><text class="t" x="474" y="142">3. Score</text><text class="s" x="474" y="160">0-100, explained</text>
+    <path class="w" d="M432 72 H456" marker-end="url(#ar)"/>
+    <path class="w" d="M540 100 V114" marker-end="url(#ar)"/>
+    <path class="w" d="M460 146 H436" marker-end="url(#ar)"/>
+    <path class="w blue" d="M636 146 H690" marker-end="url(#arb)"/>
+    <rect class="bx user" x="694" y="110" width="116" height="72" rx="10"/>
+    <text class="t" x="708" y="136">Ranked list</text><text class="s" x="708" y="154">recruiter picks</text><text class="s" x="708" y="168">who to call</text>
+  </svg>
+  <figcaption>Figure 0.1 · TalentMatch in one picture. The robot reads, understands, scores and ranks. A person always decides.</figcaption>
+</figure>
+
+<h3>What recruiters will be able to do</h3>
+<div class="two">
+  <div class="card"><h4>Manage job roles</h4><p>Create a job. AI pulls out the must-have skills, nice-to-have skills, domain and years of experience from the job description.</p></div>
+  <div class="card"><h4>Process resumes</h4><p>Upload one or a thousand. Each becomes a profile, with every skill marked <span class="pill green">stated</span> or <span class="pill amber">inferred</span>.</p></div>
+  <div class="card"><h4>Rank and search</h4><p>See applicants ranked per job, with the reason behind every point. Or ask in plain English: <em>"React developers with ERP experience, 3+ years"</em>.</p></div>
+  <div class="card"><h4>Run the hiring flow</h4><p>Move candidates through stages (new → shortlisted → interview → offer), add notes and notify the team.</p></div>
+</div>
+
+<h3>Three ideas that make the matching trustworthy</h3>
+<div class="tw"><table>
+  <tr><th>Idea</th><th>Example</th><th>Why it matters</th></tr>
+  <tr><td><strong>Infer sensibly</strong></td><td>"Built it in Next.js" → also knows <strong>React</strong> (Next.js is built on React)</td><td>Catches skills people forgot to list</td></tr>
+  <tr><td><strong>Never over-assume</strong></td><td>"Deployed on AWS" → does <em>not</em> mean they know Lambda or EC2</td><td>Stops the system from making things up</td></tr>
+  <tr><td><strong>Understand domains</strong></td><td>Odoo is a kind of ERP. A job asking for "ERP" should match an Odoo developer.</td><td>Matches meaning, not just exact words</td></tr>
+</table></div>
+
+<h3>Technical terms</h3>
+<div class="tw"><table class="terms">
+  <tr><th>Term</th><th>Simple meaning</th><th>Example from our project</th></tr>
+  <tr><td>POC (proof of concept)</td><td>A first working version to prove the idea works</td><td>TalentMatch for one company's HR team</td></tr>
+  <tr><td>Resume parsing</td><td>Turning a resume file into structured data</td><td>PDF → <code>{"skills": ["Python", "Odoo"], ...}</code></td></tr>
+  <tr><td>Evidence</td><td>The exact line in the resume that proves a skill</td><td>Skill "Odoo" ← <em>"Customized Odoo Sales modules"</em></td></tr>
+  <tr><td>Stated vs inferred skill</td><td>Written directly vs worked out from another skill</td><td>Next.js = stated (1.0); React = inferred (0.7)</td></tr>
+  <tr><td>Domain</td><td>The business area someone has worked in</td><td>ERP, e-commerce, fintech</td></tr>
+  <tr><td>Human in the loop</td><td>A person makes the final decision, not the machine</td><td>ADR-007: the system never rejects anyone by itself</td></tr>
+</table></div>
+</section>
+
+<!-- ===================== 0.2 ===================== -->
+<section id="arch">
+<h2><span class="n">0.2</span>The architecture: every part and how they connect</h2>
+<p class="lead">The finished system has four layers. Every box either scales to zero or charges only per request, so it costs almost nothing while nobody is using it.</p>
+
+<div class="box simple"><span class="label">In simple words</span>
+  <p>Think of a restaurant:</p>
+  <ul>
+    <li><strong>The dining room</strong> is the website you see. That's the <em>presentation layer</em>.</li>
+    <li><strong>The waiter</strong> takes your order to the kitchen. That's the <em>API layer</em>.</li>
+    <li><strong>The kitchen</strong> cooks, step by step. That's the <em>processing layer</em>.</li>
+    <li><strong>The fridge and pantry</strong> store the food. That's the <em>data layer</em>.</li>
+  </ul>
+  <p>In a normal restaurant you pay staff even when it's empty. In our "serverless" restaurant, <strong>staff appear only when a customer walks in</strong>, and you pay only for the minutes they work.</p>
+</div>
+
+<figure>
+  <svg viewBox="0 0 960 560" role="img" aria-label="Target architecture diagram">
+    <!-- row 1 -->
+    <rect class="bx user" x="30" y="40" width="190" height="58" rx="8"/><text class="t" x="44" y="64">Recruiter browser</text><text class="s" x="44" y="82">React web app</text>
+    <rect class="bx aws" x="270" y="40" width="190" height="58" rx="8"/><text class="t" x="284" y="64">CloudFront + S3</text><text class="s" x="284" y="82">serves the web app files</text>
+    <rect class="bx aws" x="510" y="40" width="190" height="58" rx="8"/><text class="t" x="524" y="64">Cognito</text><text class="s" x="524" y="82">sign-in, roles, MFA</text>
+    <rect class="bx" x="750" y="40" width="190" height="58" rx="8"/><text class="t" x="764" y="64">GitHub Actions</text><text class="s" x="764" y="82">tests + deploys code</text>
+    <!-- row 2 -->
+    <rect class="bx aws" x="270" y="160" width="190" height="58" rx="8"/><text class="t" x="284" y="184">API Gateway</text><text class="s" x="284" y="202">HTTP API, token check</text>
+    <rect class="bx code" x="510" y="160" width="190" height="58" rx="8"/><text class="t" x="524" y="184">Lambda · API</text><text class="s" x="524" y="202">jobs, candidates, search</text>
+    <rect class="bx ghost" x="750" y="160" width="190" height="58" rx="8"/><text class="t" x="764" y="184">CloudWatch + X-Ray</text><text class="s" x="764" y="202">logs, alarms, traces</text>
+    <!-- row 3 -->
+    <rect class="bx data" x="270" y="290" width="190" height="58" rx="8"/><text class="t" x="284" y="314">DynamoDB</text><text class="s" x="284" y="332">jobs, candidates, scores</text>
+    <rect class="bx data" x="510" y="290" width="190" height="58" rx="8"/><text class="t" x="524" y="314">S3 Vectors</text><text class="s" x="524" y="332">resume "meaning" search</text>
+    <rect class="bx warn" x="750" y="290" width="190" height="58" rx="8"/><text class="t" x="764" y="314">Amazon Bedrock</text><text class="s" x="764" y="332">Claude Haiku + Titan</text>
+    <!-- row 4 -->
+    <rect class="bx data" x="30" y="420" width="190" height="58" rx="8"/><text class="t" x="44" y="444">S3 · resumes</text><text class="s" x="44" y="462">private PDF / DOCX files</text>
+    <rect class="bx aws" x="270" y="420" width="190" height="58" rx="8"/><text class="t" x="284" y="444">EventBridge</text><text class="s" x="284" y="462">"a file arrived!"</text>
+    <rect class="grp" x="500" y="408" width="450" height="130" rx="10"/>
+    <text class="gt" x="514" y="428">Step Functions · resume pipeline</text>
+    <rect class="bx code" x="512" y="440" width="80" height="46" rx="6"/><text class="s" x="522" y="467">Extract</text>
+    <rect class="bx code" x="600" y="440" width="80" height="46" rx="6"/><text class="s" x="610" y="467">Parse skills</text>
+    <rect class="bx code" x="688" y="440" width="80" height="46" rx="6"/><text class="s" x="698" y="467">Normalize</text>
+    <rect class="bx code" x="776" y="440" width="70" height="46" rx="6"/><text class="s" x="790" y="467">Embed</text>
+    <rect class="bx code" x="854" y="440" width="86" height="46" rx="6"/><text class="s" x="862" y="467">Save, score</text>
+    <text class="lb" x="514" y="524">retries if busy · failures go to an SQS queue</text>
+    <!-- wires -->
+    <path class="w" d="M220 69 H266" marker-end="url(#ar)"/>
+    <path class="w" d="M125 40 V22 H605 V36" marker-end="url(#ar)"/><text class="lb" x="300" y="16">sign in → token</text>
+    <path class="w blue" d="M150 98 V189 H266" marker-end="url(#arb)"/><text class="lb" x="158" y="180">API calls</text>
+    <path class="w" d="M460 189 H506" marker-end="url(#ar)"/>
+    <path class="w" d="M570 218 V254 H365 V286" marker-end="url(#ar)"/>
+    <path class="w" d="M605 218 V286" marker-end="url(#ar)"/>
+    <path class="w" d="M640 218 V254 H845 V286" marker-end="url(#ar)"/>
+    <path class="w blue" d="M70 98 V416" marker-end="url(#arb)"/><text class="lb" x="78" y="300">upload file</text><text class="lb" x="78" y="314">directly</text>
+    <path class="w" d="M220 449 H266" marker-end="url(#ar)"/>
+    <path class="w" d="M460 449 H496" marker-end="url(#ar)"/>
+    <path class="w dash" d="M640 408 V352" marker-end="url(#ar)"/>
+    <path class="w dash" d="M560 408 V375 H400 V352" marker-end="url(#ar)"/>
+    <path class="w dash" d="M720 408 V375 H820 V352" marker-end="url(#ar)"/>
+  </svg>
+  <figcaption>Figure 0.2 · The finished system after Sprint 15. Green is the person, blue is AWS-managed doors and routers, purple is our own code, grey is storage, amber is AI.</figcaption>
+</figure>
+
+<h3>Each layer, in one line</h3>
+<div class="tw"><table>
+  <tr><th>Layer</th><th>Services</th><th>Job</th><th>Restaurant version</th></tr>
+  <tr><td><strong>Presentation</strong></td><td>CloudFront, S3, Cognito</td><td>Serve the React app; sign people in</td><td>Dining room + door guard</td></tr>
+  <tr><td><strong>API</strong></td><td>API Gateway, Lambda</td><td>Check the token, run the request, reply</td><td>Waiter</td></tr>
+  <tr><td><strong>Processing</strong></td><td>EventBridge, Step Functions, SQS, Lambda</td><td>Turn a resume file into a scored profile</td><td>Kitchen with a recipe card</td></tr>
+  <tr><td><strong>Data + AI</strong></td><td>DynamoDB, S3 Vectors, Bedrock</td><td>Store records, search by meaning, read text with AI</td><td>Fridge, pantry, expert chef</td></tr>
+</table></div>
+
+<h3>Technical terms</h3>
+<div class="tw"><table class="terms">
+  <tr><th>Term</th><th>Simple meaning</th><th>Example from our project</th></tr>
+  <tr><td>Serverless</td><td>You never manage a server. AWS runs your code when needed and bills per use.</td><td>Lambda runs only when someone calls the API</td></tr>
+  <tr><td>Scale to zero</td><td>When nobody uses it, it costs (almost) nothing</td><td>Our idle dev stack costs about $0/month</td></tr>
+  <tr><td>Architecture</td><td>The map of all the parts and how they talk</td><td>Figure 0.2</td></tr>
+  <tr><td>Managed service</td><td>AWS runs and patches it for you</td><td>DynamoDB, so there's no database server to update</td></tr>
+  <tr><td>Event-driven</td><td>Things happen automatically when something else happens</td><td>File uploaded → pipeline starts by itself</td></tr>
+  <tr><td>Embedding / vector</td><td>A list of numbers that captures the "meaning" of text</td><td>Similar resumes get similar number lists</td></tr>
+  <tr><td>LLM</td><td>Large language model: AI that reads and writes text</td><td>Claude Haiku 4.5 on Bedrock reads resumes</td></tr>
+</table></div>
+</section>
+
+<!-- ===================== 0.3 ===================== -->
+<section id="flow">
+<h2><span class="n">0.3</span>The journey of one resume</h2>
+<p class="lead">When a recruiter uploads a resume, eight steps happen automatically, and nobody has to press another button.</p>
+
+<div class="box simple"><span class="label">In simple words</span>
+  <p>It's like posting a parcel. You drop it in the post box (<strong>S3</strong>). The post office's alarm rings: "new parcel!" (<strong>EventBridge</strong>). A worker follows a checklist card (<strong>Step Functions</strong>): open it, read it, sort it, label it, file it. If a step fails, the card says "try again in a minute". If it keeps failing, the parcel goes to the "problem shelf" (<strong>dead-letter queue</strong>) for a human to look at.</p>
+</div>
+
+<figure>
+  <svg viewBox="0 0 900 330" role="img" aria-label="Resume pipeline: upload URL, browser upload to S3, EventBridge, Step Functions steps, then DynamoDB and S3 Vectors">
+    <rect class="bx user" x="10" y="20" width="160" height="62" rx="8"/><text class="t" x="24" y="44">1. Ask to upload</text><text class="s" x="24" y="62">API gives a 5-min</text><text class="s" x="24" y="75">upload link</text>
+    <path class="w" d="M170 51 H214" marker-end="url(#ar)"/>
+    <rect class="bx data" x="218" y="20" width="160" height="62" rx="8"/><text class="t" x="232" y="44">2. Upload to S3</text><text class="s" x="232" y="62">browser sends file</text><text class="s" x="232" y="75">straight to storage</text>
+    <path class="w" d="M378 51 H422" marker-end="url(#ar)"/>
+    <rect class="bx aws" x="426" y="20" width="160" height="62" rx="8"/><text class="t" x="440" y="44">3. EventBridge</text><text class="s" x="440" y="62">"new file!"</text><text class="s" x="440" y="75">starts the pipeline</text>
+    <path class="w" d="M586 51 H630" marker-end="url(#ar)"/>
+    <rect class="bx code" x="634" y="20" width="256" height="62" rx="8"/><text class="t" x="648" y="44">4. Extract text</text><text class="s" x="648" y="62">pypdf / python-docx; Textract OCR</text><text class="s" x="648" y="75">only if the PDF is a scanned image</text>
+    <path class="w" d="M762 82 V118" marker-end="url(#ar)"/>
+    <rect class="bx warn" x="634" y="122" width="256" height="62" rx="8"/><text class="t" x="648" y="146">5. Parse skills (AI)</text><text class="s" x="648" y="164">Claude returns JSON: skills +</text><text class="s" x="648" y="177">evidence quotes, years, domains</text>
+    <path class="w" d="M634 153 H590" marker-end="url(#ar)"/>
+    <rect class="bx code" x="426" y="122" width="160" height="62" rx="8"/><text class="t" x="440" y="146">6. Normalize</text><text class="s" x="440" y="164">rulebook cleans names,</text><text class="s" x="440" y="177">caps guesses at 0.7</text>
+    <path class="w" d="M426 153 H382" marker-end="url(#ar)"/>
+    <rect class="bx warn" x="218" y="122" width="160" height="62" rx="8"/><text class="t" x="232" y="146">7. Embed (AI)</text><text class="s" x="232" y="164">Titan turns text into</text><text class="s" x="232" y="177">a meaning vector</text>
+    <path class="w" d="M218 153 H174" marker-end="url(#ar)"/>
+    <rect class="bx code" x="10" y="122" width="160" height="62" rx="8"/><text class="t" x="24" y="146">8. Save + score</text><text class="s" x="24" y="164">profile READY;</text><text class="s" x="24" y="177">score if for a job</text>
+    <path class="w" d="M90 184 V232" marker-end="url(#ar)"/>
+    <path class="w" d="M298 184 V232" marker-end="url(#ar)"/>
+    <rect class="bx data" x="10" y="236" width="160" height="52" rx="8"/><text class="t" x="24" y="258">DynamoDB</text><text class="s" x="24" y="275">profile + score</text>
+    <rect class="bx data" x="218" y="236" width="160" height="52" rx="8"/><text class="t" x="232" y="258">S3 Vectors</text><text class="s" x="232" y="275">for plain-English search</text>
+    <rect class="bx bad" x="634" y="236" width="256" height="52" rx="8"/><text class="t" x="648" y="258">Something keeps failing?</text><text class="s" x="648" y="275">retry with waits, then a dead-letter queue</text>
+    <path class="w red dash" d="M762 184 V232" marker-end="url(#arr)"/>
+  </svg>
+  <figcaption>Figure 0.3 · A resume's journey. Follow the arrows: across the top, down, back along the middle row, then into storage. Built across Sprints 5–10.</figcaption>
+</figure>
+
+<div class="box tech"><span class="label">Technical view</span>
+  <p>The browser never sends the file through our API. It uses a <strong>presigned URL</strong>: a short-lived, single-purpose link to S3. That keeps big files off Lambda, which has request-size limits, and keeps the bucket private. S3 emits an <code>Object Created</code> event, an EventBridge rule starts a <strong>Step Functions</strong> state machine, and each state retries with exponential backoff when Bedrock throttles.</p>
+</div>
+</section>
+
+<!-- ===================== 0.4 ===================== -->
+<section id="score">
+<h2><span class="n">0.4</span>How a match score is built</h2>
+<p class="lead">AI reads the resume, but plain code calculates the score. That way the same resume always gets the same score, and every point can be explained.</p>
+
+<div class="box simple"><span class="label">In simple words</span>
+  <p>A school report card has subjects with different weights: maths might count more than drawing. A TalentMatch score is a report card out of 100 with five "subjects". The must-have skills count the most.</p>
+</div>
+
+<figure>
+  <svg viewBox="0 0 820 170" role="img" aria-label="Score weights bar: must-have 45, nice-to-have 15, domain 15, experience 15, similarity 10">
+    <rect class="fill-blue" x="10" y="20" width="360" height="44" rx="4"/>
+    <rect class="fill-purple" x="370" y="20" width="120" height="44"/>
+    <rect class="fill-green" x="490" y="20" width="120" height="44"/>
+    <rect class="fill-amber" x="610" y="20" width="120" height="44"/>
+    <rect class="fill-muted" x="730" y="20" width="80" height="44" rx="4"/>
+    <text x="24" y="48" style="fill:#fff;font:700 15px var(--body)">45 · Must-have skills</text>
+    <text x="382" y="48" style="fill:#fff;font:700 13px var(--body)">15 · Nice</text>
+    <text x="502" y="48" style="fill:#fff;font:700 13px var(--body)">15 · Domain</text>
+    <text x="622" y="48" style="fill:#fff;font:700 13px var(--body)">15 · Years</text>
+    <text x="742" y="48" style="fill:#fff;font:700 13px var(--body)">10 · Sim</text>
+    <text class="s" x="10" y="92">Best match per required skill × its confidence, averaged</text>
+    <text class="s" x="370" y="92">Same, for extras</text>
+    <text class="s" x="490" y="108">ERP ⊃ Odoo tree</text>
+    <text class="s" x="610" y="92">Years vs range</text>
+    <text class="s" x="730" y="108">Meaning match</text>
+    <text class="lb" x="10" y="150">0</text><text class="lb" x="360" y="150">45</text><text class="lb" x="482" y="150">60</text><text class="lb" x="602" y="150">75</text><text class="lb" x="722" y="150">90</text><text class="lb" x="796" y="150">100</text>
+    <path class="w" d="M10 130 H810"/>
+  </svg>
+  <figcaption>Figure 0.4 · The five parts of a score. Bar widths are drawn to scale, from 0 to 100.</figcaption>
+</figure>
+
+<h3>Worked example: an "Odoo Developer" job</h3>
+<p>The job needs Python, Odoo and PostgreSQL (must-have); JavaScript and eCommerce (nice-to-have); the ERP domain; 3–6 years.</p>
+<div class="tw"><table>
+  <tr><th>Part</th><th>Candidate A · Odoo developer</th><th class="num">A</th><th>Candidate B · SAP consultant</th><th class="num">B</th></tr>
+  <tr><td>Must-have (45)</td><td>Python 1.0, Odoo 1.0, PostgreSQL 0.5 (inferred)</td><td class="num">37.5</td><td>Python 1.0, Odoo 0, PostgreSQL 0</td><td class="num">15.0</td></tr>
+  <tr><td>Nice-to-have (15)</td><td>JavaScript, eCommerce</td><td class="num">15.0</td><td>none</td><td class="num">0.0</td></tr>
+  <tr><td>Domain (15)</td><td>Odoo is inside ERP</td><td class="num">15.0</td><td>SAP is inside ERP</td><td class="num">15.0</td></tr>
+  <tr><td>Experience (15)</td><td>4 years, inside 3–6</td><td class="num">15.0</td><td>7 years, just above</td><td class="num">13.5</td></tr>
+  <tr><td>Similarity (10)</td><td>cosine 0.78</td><td class="num">7.8</td><td>cosine 0.55</td><td class="num">5.5</td></tr>
+  <tr class="total"><td>Total</td><td></td><td class="num">90.3</td><td></td><td class="num">49.0</td></tr>
+</table></div>
+<div class="box warn"><span class="label">Fairness rule</span><p>Name, gender, age, photo, religion, caste and marital status <strong>never enter the scorer</strong>. Sprint 9 has a test that changes a name and gender and proves the score doesn't move.</p></div>
+</section>
+
+<!-- ===================== 0.5 ===================== -->
+<section id="sprints">
+<h2><span class="n">0.5</span>The 16 sprints and 4 milestones</h2>
+<p class="lead">We build TalentMatch in 16 small steps called sprints. Every sprint ends with something working and live, never half-built.</p>
+
+<div class="box simple"><span class="label">In simple words</span>
+  <p>You don't build a house by making all the walls, then all the windows, then all the roofs. You build <strong>one small room that is fully usable</strong>, then the next. Each sprint is one room. Each milestone is one finished floor you can actually live in.</p>
+</div>
+
+<figure>
+  <svg viewBox="0 0 900 326" role="img" aria-label="Roadmap of 16 sprints in 4 milestones, with sprints 0, 1 and 2a done">
+    <text class="gt" x="10" y="24">M1 · Platform foundation</text>
+    <rect class="bx user" x="10" y="34" width="160" height="44" rx="6"/><text class="t" x="20" y="54">S0 Account</text><text class="s" x="20" y="70">done</text>
+    <rect class="bx user" x="180" y="34" width="160" height="44" rx="6"/><text class="t" x="190" y="54">S1 Skeleton</text><text class="s" x="190" y="70">done</text>
+    <rect class="bx aws" x="350" y="34" width="160" height="44" rx="6" style="stroke-width:2.5"/><text class="t" x="360" y="54">S2 Job roles</text><text class="s" x="360" y="70">2a done · 2b, 2c next</text>
+    <rect class="bx ghost" x="520" y="34" width="160" height="44" rx="6"/><text class="t" x="530" y="54">S3 Sign-in</text><text class="s" x="530" y="70">Cognito, roles</text>
+    <rect class="bx ghost" x="690" y="34" width="160" height="44" rx="6"/><text class="t" x="700" y="54">S4 Pipeline</text><text class="s" x="700" y="70">GitHub Actions</text>
+
+    <text class="gt" x="10" y="104">M2 · Resume intelligence</text>
+    <rect class="bx ghost" x="10" y="114" width="160" height="44" rx="6"/><text class="t" x="20" y="134">S5 Intake</text><text class="s" x="20" y="150">upload, S3</text>
+    <rect class="bx ghost" x="180" y="114" width="160" height="44" rx="6"/><text class="t" x="190" y="134">S6 Events</text><text class="s" x="190" y="150">EventBridge, OCR</text>
+    <rect class="bx ghost" x="350" y="114" width="160" height="44" rx="6"/><text class="t" x="360" y="134">S7 AI skills</text><text class="s" x="360" y="150">Bedrock, evidence</text>
+    <rect class="bx ghost" x="520" y="114" width="160" height="44" rx="6"/><text class="t" x="530" y="134">S8 Reliable</text><text class="s" x="530" y="150">Step Functions, SQS</text>
+
+    <text class="gt" x="10" y="184">M3 · Matching and hiring</text>
+    <rect class="bx ghost" x="10" y="194" width="160" height="44" rx="6"/><text class="t" x="20" y="214">S9 Matching</text><text class="s" x="20" y="230">score out of 100</text>
+    <rect class="bx ghost" x="180" y="194" width="160" height="44" rx="6"/><text class="t" x="190" y="214">S10 Search</text><text class="s" x="190" y="230">vectors, plain English</text>
+    <rect class="bx ghost" x="350" y="194" width="160" height="44" rx="6"/><text class="t" x="360" y="214">S11 Hiring flow</text><text class="s" x="360" y="230">stages, email</text>
+
+    <text class="gt" x="10" y="264">M4 · Production readiness</text>
+    <rect class="bx ghost" x="10" y="274" width="160" height="44" rx="6"/><text class="t" x="20" y="294">S12 Privacy</text><text class="s" x="20" y="310">erase, retention</text>
+    <rect class="bx ghost" x="180" y="274" width="160" height="44" rx="6"/><text class="t" x="190" y="294">S13 Quality</text><text class="s" x="190" y="310">end-to-end tests</text>
+    <rect class="bx ghost" x="350" y="274" width="160" height="44" rx="6"/><text class="t" x="360" y="294">S14 Operations</text><text class="s" x="360" y="310">alarms, backups</text>
+    <rect class="bx ghost" x="520" y="274" width="160" height="44" rx="6"/><text class="t" x="530" y="294">S15 Go-live</text><text class="s" x="530" y="310">load test, review</text>
+  </svg>
+  <figcaption>Figure 0.5 · The roadmap. Green = done, solid blue = in progress (Sprint 2), dashed = coming later. Each row ends in a usable release.</figcaption>
+</figure>
+
+<div class="tw"><table>
+  <tr><th>Milestone</th><th>Sprints</th><th>Release at the end</th><th>Exam it prepares you for</th></tr>
+  <tr><td><strong>M1</strong> Platform foundation</td><td>S0–S4</td><td>Secure app with roles, job management, automated deploys</td><td>Cloud Practitioner</td></tr>
+  <tr><td><strong>M2</strong> Resume intelligence</td><td>S5–S8</td><td>Every resume becomes an evidence-backed profile, in bulk</td><td>—</td></tr>
+  <tr><td><strong>M3</strong> Matching and hiring</td><td>S9–S11</td><td>Ranked applicants, search, a working hiring pipeline</td><td>AI Practitioner, Developer – Associate</td></tr>
+  <tr><td><strong>M4</strong> Production readiness</td><td>S12–S15</td><td>Compliant, monitored, load-tested, live for HR</td><td>Solutions Architect – Associate</td></tr>
+</table></div>
+
+<h3>Technical terms</h3>
+<div class="tw"><table class="terms">
+  <tr><th>Term</th><th>Simple meaning</th><th>Example from our project</th></tr>
+  <tr><td>Sprint</td><td>A short block of work that ends with something working</td><td>Sprint 1: health API + web page, live</td></tr>
+  <tr><td>Milestone</td><td>A group of sprints that adds up to a usable release</td><td>M1 = foundation (S0–S4)</td></tr>
+  <tr><td>Walking skeleton</td><td>The thinnest possible end-to-end version, live early</td><td>Browser → CDN → API → Lambda → logs</td></tr>
+  <tr><td>Vertical slice</td><td>One feature through every layer: database, API, UI, tests</td><td>Sprint 2: jobs table + jobs API + jobs page</td></tr>
+  <tr><td>Release tag</td><td>A named bookmark in git history</td><td><code>git tag sprint-1</code></td></tr>
+</table></div>
+</section>
+
+<!-- ===================== 0.6 ===================== -->
+<section id="loop">
+<h2><span class="n">0.6</span>How every sprint runs</h2>
+<p class="lead">Every sprint follows the same six-step learning loop, and we move on only when you can answer the check questions without notes.</p>
+
+<figure>
+  <svg viewBox="0 0 860 200" role="img" aria-label="Learning loop: theory, lab, build, deploy, test, recap, back to theory">
+    <rect class="bx aws" x="10" y="40" width="122" height="70" rx="10"/><text class="t" x="24" y="66">1 Theory</text><text class="s" x="24" y="84">concepts first,</text><text class="s" x="24" y="98">with pictures</text>
+    <path class="w" d="M132 75 H150" marker-end="url(#ar)"/>
+    <rect class="bx warn" x="154" y="40" width="122" height="70" rx="10"/><text class="t" x="168" y="66">2 Lab</text><text class="s" x="168" y="84">tiny throwaway</text><text class="s" x="168" y="98">experiment</text>
+    <path class="w" d="M276 75 H294" marker-end="url(#ar)"/>
+    <rect class="bx code" x="298" y="40" width="122" height="70" rx="10"/><text class="t" x="312" y="66">3 Build</text><text class="s" x="312" y="84">real project</text><text class="s" x="312" y="98">code</text>
+    <path class="w" d="M420 75 H438" marker-end="url(#ar)"/>
+    <rect class="bx aws" x="442" y="40" width="122" height="70" rx="10"/><text class="t" x="456" y="66">4 Deploy</text><text class="s" x="456" y="84">cdk diff, then</text><text class="s" x="456" y="98">cdk deploy</text>
+    <path class="w" d="M564 75 H582" marker-end="url(#ar)"/>
+    <rect class="bx user" x="586" y="40" width="122" height="70" rx="10"/><text class="t" x="600" y="66">5 Test</text><text class="s" x="600" y="84">unit, curl,</text><text class="s" x="600" y="98">browser, logs</text>
+    <path class="w" d="M708 75 H726" marker-end="url(#ar)"/>
+    <rect class="bx data" x="730" y="40" width="122" height="70" rx="10"/><text class="t" x="744" y="66">6 Recap</text><text class="s" x="744" y="84">questions, cost,</text><text class="s" x="744" y="98">journal, destroy</text>
+    <path class="w blue dash" d="M791 110 V160 H71 V114" marker-end="url(#arb)"/>
+    <text class="lb" x="330" y="180">next sprint starts the loop again</text>
+  </svg>
+  <figcaption>Figure 0.6 · The learning loop. The lab comes before the real build, so you try a service safely before it matters.</figcaption>
+</figure>
+
+<div class="two">
+  <div class="card"><h4>Definition of done (every sprint)</h4>
+    <ul class="check">
+      <li>All infrastructure is in CDK code, nothing clicked by hand</li>
+      <li>Unit tests and CDK tests pass</li>
+      <li>Deployed to dev and tested live</li>
+      <li>No errors in the logs during testing</li>
+      <li>Cost checked; still inside the $15 budget</li>
+      <li>Committed and tagged <code>sprint-N</code>, journal updated</li>
+    </ul></div>
+  <div class="card"><h4>Engineering principles</h4>
+    <ul class="check">
+      <li>Serverless only: nothing charges while idle</li>
+      <li>Separate dev and prod stacks</li>
+      <li>Least-privilege permissions for every function</li>
+      <li>AI extracts facts; plain code scores them</li>
+      <li>Contact details are never sent to the AI</li>
+      <li>People make every hiring decision</li>
+    </ul></div>
+</div>
+</section>
+
+<!-- ===================== 0.7 ===================== -->
+<section id="decisions">
+<h2><span class="n">0.7</span>The decisions we made, and why</h2>
+<p class="lead">Big choices are written down as "decision records" (ADRs), so the reasons stay with the code. Here are the plan's decisions plus the changes we made when we started.</p>
+
+<div class="box simple"><span class="label">In simple words</span>
+  <p>When your family decides "we'll go by train, not car, because it's cheaper and we can sleep", someone writes it on the fridge. Months later, nobody argues about it again: the reason is right there. ADRs are those fridge notes, for software.</p>
+</div>
+
+<h3>From the plan</h3>
+<div class="tw"><table>
+  <tr><th>ADR</th><th>Decision</th><th>Why</th></tr>
+  <tr><td>001</td><td>Serverless on AWS</td><td>Pay per use, nothing charged while idle, AI and data with one provider</td></tr>
+  <tr><td>002</td><td>Mumbai region (<code>ap-south-1</code>)</td><td>Data at rest stays in India (DPDP Act)</td></tr>
+  <tr><td>003</td><td>One account, separate dev/prod stacks</td><td>Simple now; can move to separate accounts later with no code change</td></tr>
+  <tr><td>004</td><td>DynamoDB single table</td><td>Queries known up front; on-demand; no minimum cost</td></tr>
+  <tr><td>005</td><td>S3 Vectors for search</td><td>Pay per query. OpenSearch Serverless costs about $175/month even when idle.</td></tr>
+  <tr><td>006</td><td>AI extracts, code scores</td><td>Repeatable, explainable scores; protected attributes kept out</td></tr>
+  <tr><td>007</td><td>People decide</td><td>The system recommends; it never rejects anyone automatically</td></tr>
+  <tr><td>008</td><td>Single company for now</td><td>No multi-tenant layer in the POC; keys designed so one can be added later</td></tr>
+</table></div>
+
+<h3>Our changes when we started</h3>
+<div class="tw"><table>
+  <tr><th>Topic</th><th>Plan said</th><th>We chose</th><th>Why</th></tr>
+  <tr><td>Infrastructure tool</td><td>AWS SAM (<code>template.yaml</code>)</td><td><strong>AWS CDK</strong>, TypeScript</td><td>Your choice. Real code with types and autocomplete; same architecture underneath.</td></tr>
+  <tr><td>Lambda language</td><td>Python</td><td><strong>Python 3.12</strong>, arm64</td><td>ADR-003 in the newer plan; arm64 is about 20% cheaper</td></tr>
+  <tr><td>Region</td><td>Design doc: <code>us-east-1</code>; plan v2.1: Mumbai</td><td><strong>Mumbai</strong></td><td>Plan v2.1 is newer and matches the privacy decision</td></tr>
+  <tr><td>Folder</td><td><code>talentmatch/</code></td><td><code>~/Work/labs/talentmatch</code></td><td>A fresh start; <code>cdk-hello</code> was just a scratch lab</td></tr>
+</table></div>
+
+<div class="box story"><span class="label">Real discovery from Sprint 0</span>
+  <p>ADR-002 assumed AI calls would have to leave India, because Mumbai had no India-only option for Claude. When we checked, your account showed an India-only inference profile: <code>in.anthropic.claude-haiku-4-5…</code>. That may remove the cross-border approval needed in Sprint 7. We'll confirm when we get there.</p>
+</div>
+
+<h3>Why AWS and not Vercel + Supabase?</h3>
+<div class="tw"><table>
+  <tr><th>Factor</th><th>AWS serverless</th><th>Vercel + Supabase</th><th>Better</th></tr>
+  <tr><td>Cost at POC size</td><td>$2–8/month, pay per use</td><td>$47–50/month ($45 fixed plan fees)</td><td><span class="pill">AWS</span></td></tr>
+  <tr><td>Resume pipeline</td><td>Step Functions: retries, visual history</td><td>Function time limits; often needs an extra service</td><td><span class="pill">AWS</span></td></tr>
+  <tr><td>Where resume data goes</td><td>One vendor, one account, one region</td><td>Three vendors (Vercel, Supabase, the AI provider)</td><td><span class="pill">AWS</span></td></tr>
+  <tr><td>Ad-hoc filtering and reports</td><td>DynamoDB is harder than SQL</td><td>Postgres + pgvector in one query</td><td><span class="pill amber">Supabase</span></td></tr>
+  <tr><td>Developer experience</td><td>Steeper: IAM, CORS, deploys</td><td>Push to git, previews per branch</td><td><span class="pill amber">Vercel</span></td></tr>
+</table></div>
+</section>
+
+<!-- ===================== 0.8 ===================== -->
+<section id="cost">
+<h2><span class="n">0.8</span>What it costs</h2>
+<p class="lead">At POC size (about 300 resumes a month) the whole system is estimated at $2–8 a month. Almost all of that is AI; the rest fits inside free tiers.</p>
+
+<figure>
+  <svg viewBox="0 0 820 230" role="img" aria-label="Bar chart: AWS about 5 dollars a month vs Vercel plus Supabase about 48 dollars a month at POC size">
+    <text class="gt" x="10" y="22">Monthly cost at POC size (middle of each range)</text>
+    <text class="t" x="10" y="72">AWS serverless</text>
+    <rect class="fill-blue" x="200" y="52" width="69" height="30" rx="4"/>
+    <text class="m" x="280" y="72">≈ $5 ($2–8)</text>
+    <text class="t" x="10" y="132">Vercel + Supabase</text>
+    <rect class="fill-muted" x="200" y="112" width="560" height="30" rx="4"/>
+    <rect class="fill-amber" x="200" y="112" width="49" height="30" rx="4"/>
+    <text class="m" x="590" y="132">≈ $48 ($47–50)</text>
+    <path class="w" d="M200 160 H780"/>
+    <text class="lb" x="196" y="178">$0</text><text class="lb" x="340" y="178">$12</text><text class="lb" x="480" y="178">$24</text><text class="lb" x="620" y="178">$36</text><text class="lb" x="752" y="178">$48</text>
+    <rect class="fill-amber" x="200" y="198" width="14" height="10"/><text class="s" x="220" y="207">AI usage (same on both, ≈ $2–5)</text>
+    <rect class="fill-muted" x="450" y="198" width="14" height="10"/><text class="s" x="470" y="207">Fixed plan fees ($45)</text>
+  </svg>
+  <figcaption>Figure 0.7 · Most of the difference is fixed monthly fees. AWS has none, so an idle month costs about $0.</figcaption>
+</figure>
+
+<div class="box danger"><span class="label">Services we never use (they charge even when idle)</span>
+  <div class="tw"><table>
+    <tr><th>Service</th><th class="num">Approx. minimum</th><th>What we use instead</th></tr>
+    <tr><td>OpenSearch Serverless</td><td class="num">~$175/month</td><td>S3 Vectors</td></tr>
+    <tr><td>Aurora / RDS database</td><td class="num">$45+/month</td><td>DynamoDB on-demand</td></tr>
+    <tr><td>NAT Gateway</td><td class="num">~$32/month</td><td>No Lambdas inside a VPC</td></tr>
+    <tr><td>Amazon Kendra</td><td class="num">hundreds/month</td><td>Our own vector search</td></tr>
+    <tr><td>WAF</td><td class="num">$5+/month</td><td>API throttling + strict checks (WAF later, when public)</td></tr>
+  </table></div>
+</div>
+
+<h3>Guardrails that protect your bill</h3>
+<ul class="check">
+  <li>The budget <code>talentmatch-monthly</code> at $15 alerts you by email</li>
+  <li>Every log group keeps logs for 7 days only</li>
+  <li><code>cdk destroy TalentMatch-dev</code> at the end of every session</li>
+  <li>Resumes are cut to about 6k tokens before they reach the AI</li>
+  <li>Every resource tagged <code>project=talentmatch</code> (see 0.10: this tag is currently missing)</li>
+</ul>
+</section>
+
+<!-- ===================== 0.9 ===================== -->
+<section id="repo">
+<h2><span class="n">0.9</span>The project folder</h2>
+<p class="lead">This is your real <code>~/Work/labs/talentmatch</code> today. Each folder has one job, and the plan adds the rest as we go.</p>
+
+<figure>
+  <svg viewBox="0 0 860 420" role="img" aria-label="Project folder tree with what runs where">
+    <text class="m" x="20" y="30" style="font-weight:700">talentmatch/</text>
+    <text class="m" x="40" y="60">bin/talentmatch.ts</text><text class="s" x="300" y="60">which stacks exist (dev, prod) · runs on your Mac</text>
+    <text class="m" x="40" y="88">lib/talentmatch-stack.ts</text><text class="s" x="300" y="88">all AWS resources · runs on your Mac</text>
+    <text class="m" x="40" y="116">src/api/app.py</text><text class="s" x="300" y="116">router: which route → which function · runs in Lambda</text>
+    <text class="m" x="40" y="144">src/api/jobs.py</text><text class="s" x="300" y="144">job data logic (DynamoDB) · runs in Lambda</text>
+    <text class="m" x="40" y="172">src/api/errors.py</text><text class="s" x="300" y="172">one error type: ApiError · runs in Lambda</text>
+    <text class="m" x="40" y="200">frontend/</text><text class="s" x="300" y="200">React + Vite app · built to frontend/dist, served by CloudFront</text>
+    <text class="m" x="40" y="228">test/talentmatch.test.ts</text><text class="s" x="300" y="228">CDK tests (Jest) · npm test</text>
+    <text class="m" x="40" y="256">tests/api/test_*.py</text><text class="s" x="300" y="256">Python tests (unittest + moto)</text>
+    <text class="m" x="40" y="284">docs/learning/</text><text class="s" x="300" y="284">this book</text>
+    <text class="m" x="40" y="312">cdk.json, package.json</text><text class="s" x="300" y="312">how CDK runs the app; Node packages</text>
+    <text class="m" x="40" y="340">requirements-dev.txt</text><text class="s" x="300" y="340">Python packages for tests (boto3, moto)</text>
+    <text class="m" x="40" y="368">cdk.out/  .venv/  node_modules/</text><text class="s" x="300" y="368">generated; never edit, never commit</text>
+    <rect class="fill-blue" x="20" y="48" width="6" height="44" rx="2"/>
+    <rect class="fill-purple" x="20" y="104" width="6" height="72" rx="2"/>
+    <rect class="fill-green" x="20" y="188" width="6" height="16" rx="2"/>
+    <rect class="fill-amber" x="20" y="216" width="6" height="44" rx="2"/>
+    <rect class="fill-muted" x="20" y="300" width="6" height="72" rx="2"/>
+    <text class="lb" x="20" y="404">blue = infrastructure · purple = Lambda code · green = web app · amber = tests · grey = config/generated</text>
+  </svg>
+  <figcaption>Figure 0.8 · What each file is for, and where it runs. Only <code>src/</code> and <code>frontend/dist</code> ever run in AWS.</figcaption>
+</figure>
+</section>
+
+<!-- ===================== 0.10 ===================== -->
+<section id="now">
+<h2><span class="n">0.10</span>Where we are right now</h2>
+<p class="lead">Sprints 0, 1 and 2a are done. You have a working system with a web page, an API and a database. It's destroyed between sessions to keep costs at zero.</p>
+
+<figure>
+  <svg viewBox="0 0 900 250" role="img" aria-label="What is built today: browser, CloudFront, S3, API Gateway, Lambda, CloudWatch Logs, DynamoDB">
+    <rect class="bx user" x="10" y="30" width="150" height="56" rx="8"/><text class="t" x="24" y="54">Your browser</text><text class="s" x="24" y="72">or curl</text>
+    <path class="w blue" d="M160 58 H206" marker-end="url(#arb)"/>
+    <rect class="bx aws" x="210" y="30" width="150" height="56" rx="8"/><text class="t" x="224" y="54">CloudFront</text><text class="s" x="224" y="72">HTTPS, cache</text>
+    <path class="w" d="M360 58 H406" marker-end="url(#ar)"/><text class="lb" x="366" y="50">OAC</text>
+    <rect class="bx data" x="410" y="30" width="150" height="56" rx="8"/><text class="t" x="424" y="54">S3 web bucket</text><text class="s" x="424" y="72">index.html, config</text>
+    <path class="w blue" d="M85 86 V158 H206" marker-end="url(#arb)"/><text class="lb" x="94" y="150">fetch /v1/...</text>
+    <rect class="bx aws" x="210" y="130" width="150" height="56" rx="8"/><text class="t" x="224" y="154">HTTP API</text><text class="s" x="224" y="172">4 routes + CORS</text>
+    <path class="w" d="M360 158 H406" marker-end="url(#ar)"/>
+    <rect class="bx code" x="410" y="130" width="150" height="56" rx="8"/><text class="t" x="424" y="154">Lambda (Python)</text><text class="s" x="424" y="172">app.py → jobs.py</text>
+    <path class="w" d="M560 158 H606" marker-end="url(#ar)"/><text class="lb" x="566" y="150">grant</text>
+    <rect class="bx data" x="610" y="130" width="150" height="56" rx="8"/><text class="t" x="624" y="154">DynamoDB</text><text class="s" x="624" y="172">jobs + GSI1</text>
+    <path class="w dash" d="M485 186 V214 H606" marker-end="url(#ar)"/>
+    <rect class="bx data" x="610" y="196" width="190" height="44" rx="8"/><text class="t" x="624" y="223">/talentmatch/dev/api</text>
+    <text class="lb" x="660" y="64">S0 + S1 + S2a: built</text>
+  </svg>
+  <figcaption>Figure 0.9 · Everything built so far. Compare it with Figure 0.2 to see how much is still to come.</figcaption>
+</figure>
+
+<div class="tw"><table>
+  <tr><th>Sprint</th><th>What you built</th><th>Status</th><th>Chapter</th></tr>
+  <tr><td>S0</td><td>Account, CLI login (<code>aws login</code>), budget, CloudTrail, CDK bootstrap, Bedrock check</td><td><span class="pill green">done</span></td><td><a href="01-aws-basics-and-account-setup.html">1</a>, <a href="02-infrastructure-as-code-with-cdk.html">2</a></td></tr>
+  <tr><td>S1</td><td>Health Lambda + HTTP API + logs; React page on S3 + CloudFront</td><td><span class="pill green">done</span></td><td><a href="03-lambda-and-the-health-api.html">3</a>, <a href="04-hosting-the-ui-s3-cloudfront.html">4</a></td></tr>
+  <tr><td>S2a</td><td>DynamoDB table + create / get / list jobs API + tests</td><td><span class="pill green">done</span></td><td><a href="05-dynamodb-explained.html">5</a>, <a href="06-building-the-jobs-api.html">6</a></td></tr>
+  <tr><td>S2b</td><td>Edit / close jobs, conditional updates, idempotency keys</td><td><span class="pill">next</span></td><td>coming</td></tr>
+  <tr><td>S2c</td><td>React jobs pages + OpenAPI description</td><td><span class="pill amber">later</span></td><td>coming</td></tr>
+</table></div>
+
+<div class="box warn"><span class="label">Small to-dos found while writing this book</span>
+  <ul>
+    <li><strong>The cost tag is missing.</strong> <code>bin/talentmatch.ts</code> no longer has <code>cdk.Tags.of(app).add('project', 'talentmatch');</code> after the loop. Without it, Cost Explorer can't show TalentMatch costs on their own. Add it back, then activate the <code>project</code> tag in Billing → Cost allocation tags.</li>
+    <li><strong><code>frontend/public/config.json</code> is not git-ignored.</strong> It holds your dev API URL, which changes after every destroy. Add <code>frontend/public/config.json</code> to the root <code>.gitignore</code>.</li>
+  </ul>
+</div>
+
+<h3>How to use this book</h3>
+<ol class="steps">
+  <li><strong>Read the chapters in order.</strong> Each one builds on the one before it.</li>
+  <li><strong>Read the green "In simple words" box first,</strong> then the technical view. If the technical part is confusing, go back to the simple one.</li>
+  <li><strong>Do every "Try it" yourself.</strong> Type the commands; don't paste. Your fingers learn too.</li>
+  <li><strong>Answer each "Check yourself" question out loud</strong> before you click to reveal the answer.</li>
+  <li><strong>Do one "Explore more" item per session.</strong> These are extras we haven't done together yet.</li>
+</ol>
+</section>
+
+<!-- ===================== Q&A ===================== -->
+<section id="qa">
+<h2><span class="n">0.11</span>Check yourself</h2>
+<p>Try to answer in your head first, then click to reveal.</p>
+<div class="qa-list">
+  <details class="qa"><summary>What does TalentMatch do, in one sentence?</summary><div class="a">It reads resumes, records every skill with the line that proves it, and ranks candidates against a job with a score out of 100 that anyone can check. A person makes the final decision.</div></details>
+  <details class="qa"><summary>Why does the AI extract skills but plain code calculate the score?</summary><div class="a">AI answers can vary slightly each time, and it's hard to explain exactly why it gave a number. Plain code gives the <strong>same score for the same input every time</strong>, every point can be explained, and protected attributes like gender or religion can be kept out completely (ADR-006).</div></details>
+  <details class="qa"><summary>What are the four layers of the architecture?</summary><div class="a">Presentation (CloudFront, S3, Cognito), API (API Gateway, Lambda), Processing (EventBridge, Step Functions, SQS) and Data + AI (DynamoDB, S3 Vectors, Bedrock).</div></details>
+  <details class="qa"><summary>Why does the browser upload resumes directly to S3 instead of through the API?</summary><div class="a">Files can be large, and Lambda/API Gateway have request-size limits. A presigned URL is a short-lived link that lets the browser put one file into the private bucket. It's faster and cheaper, and the bucket stays private.</div></details>
+  <details class="qa"><summary>"Deployed the application on AWS": should the system record the skill "Lambda"?</summary><div class="a">No. That's over-assuming. It could have been EC2, ECS, Lambda or Amplify. The system records only "AWS (general)" with low confidence (about 0.4). <em>Never over-assume</em> is one of the three core ideas.</div></details>
+  <details class="qa"><summary>Candidate B (an SAP consultant) got full domain marks for an Odoo job. Is that a bug?</summary><div class="a">No. SAP and Odoo are both ERP systems, so the domain part (15 points) is fully earned. But B's total is still low (49 vs 90.3) because the Odoo-specific must-have skills are missing. The domain helps, but skills decide.</div></details>
+  <details class="qa"><summary>What is a walking skeleton, and which sprint built ours?</summary><div class="a">The thinnest possible end-to-end version of the system, live early: browser → CloudFront → API → Lambda → logs. Sprint 1 built it. Later sprints add flesh to these bones.</div></details>
+  <details class="qa"><summary>Why do we avoid OpenSearch Serverless and NAT Gateways?</summary><div class="a">They charge every hour even when nobody uses them: about $175/month and $32/month. That alone would blow the $15 budget. We use S3 Vectors (pay per query) and keep Lambdas outside a VPC instead.</div></details>
+  <details class="qa"><summary>We changed the plan from SAM to CDK. Did the architecture change?</summary><div class="a">No. Both tools produce CloudFormation templates that create the same AWS resources. Only the tooling changed: <code>sam deploy</code> became <code>cdk deploy</code>, <code>template.yaml</code> became <code>lib/talentmatch-stack.ts</code>, and SAM policy templates became CDK <code>grant*()</code> calls.</div></details>
+  <details class="qa"><summary>Which files in our project actually run inside AWS?</summary><div class="a">Only <code>src/api/*.py</code> (zipped into the Lambda) and the built <code>frontend/dist</code> (served by CloudFront from S3). <code>bin/</code> and <code>lib/</code> run on your Mac and only <em>describe</em> resources.</div></details>
+  <details class="qa"><summary>What must be true before we call a sprint "done"?</summary><div class="a">Everything is in code, unit and CDK tests pass, it's deployed to dev and tested live, the logs show no errors, cost is checked, and it's committed and tagged <code>sprint-N</code> with a journal entry.</div></details>
+  <details class="qa"><summary>Why does every log group keep logs for only 7 days?</summary><div class="a">To stay inside the free tier. Logs are only useful for recent debugging in a POC, and longer retention slowly adds storage cost.</div></details>
+</div>
+</section>
+
+<nav class="pager" aria-label="Previous and next chapter">
+  <a class="prev" href="index.html"><small>← Back</small>Book home</a>
+  <a class="next" href="01-aws-basics-and-account-setup.html"><small>Next →</small>1 · AWS basics and account setup</a>
+</nav>
+</main>
+</body>
+</html>
